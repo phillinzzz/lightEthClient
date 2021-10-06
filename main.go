@@ -2,87 +2,41 @@ package main
 
 import (
 	"fmt"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/p2p"
-	"github.com/ethereum/go-ethereum/p2p/enode"
-	"github.com/ethereum/go-ethereum/p2p/nat"
-	"github.com/ethereum/go-ethereum/params"
+	"gopkg.in/urfave/cli.v1"
 	"os"
-	"runtime"
 )
 
-//type gethConfig struct {
-//	Eth      ethconfig.Config
-//	Node     node.Config
-//}
-
 func main() {
-	// customize the logger
-	logger := log.New()
-	handler := log.StreamHandler(os.Stdout, log.LogfmtFormat())
-	log.Root().SetHandler(handler)
+	var language string
 
-	// generate private key!
-	key, err := crypto.GenerateKey()
-	if err != nil {
-		logger.Crit("Failed to generate ephemeral node key", "err", err)
-		return
-	}
-	logger.Info("Private Node Key generated", "Key", key.D)
+	app := cli.NewApp()
+	app.Name = "LightEthClient"
+	app.Usage = "light weight eth client"
 
-	//etgConfig := ethconfig.Defaults
-	// Load defaults.
-	p2pConfig := p2p.Config{
-		Name:       fmt.Sprintf("Geth/v1.10.9-stable-eae3b194/%s-%s/%s", runtime.GOOS, runtime.GOARCH, runtime.Version()),
-		PrivateKey: key,
-		ListenAddr: ":30303",
-		MaxPeers:   50,
-		NAT:        nat.Any(),
-		Logger:     logger,
+	app.Flags = []cli.Flag{
+		cli.StringFlag{
+			Name:        "lang",
+			Usage:       "language for greeting",
+			Value:       "english",
+			Destination: &language,
+		},
 	}
 
-	// add pre-configured BootstrapNodes to config
-	urls := params.MainnetBootnodes
-	p2pConfig.BootstrapNodes = make([]*enode.Node, 0, len(urls))
-	for _, url := range urls {
-		if url != "" {
-			node, err := enode.Parse(enode.ValidSchemes, url)
-			if err != nil {
-				logger.Crit("Bootstrap URL invalid", "enode", url, "err", err)
-				continue
-			}
-			p2pConfig.BootstrapNodes = append(p2pConfig.BootstrapNodes, node)
+	app.Action = func(c *cli.Context) error {
+		fmt.Println("the app is running...")
+
+		name := "antonio"
+		if c.NArg() > 0 {
+			name = c.Args()[0]
 		}
-	}
-
-	// add pre-configured BootstrapNodesV5 to config
-	urls2 := params.V5Bootnodes
-	p2pConfig.BootstrapNodes = make([]*enode.Node, 0, len(urls2))
-	for _, url := range urls {
-		if url != "" {
-			node, err := enode.Parse(enode.ValidSchemes, url)
-			if err != nil {
-				logger.Crit("Bootstrap URL invalid", "enode", url, "err", err)
-				continue
-			}
-			p2pConfig.BootstrapNodesV5 = append(p2pConfig.BootstrapNodesV5, node)
+		if c.String("lang") == "spanish" {
+			fmt.Println("hola", name)
+		} else {
+			fmt.Println("hello", name)
 		}
+
+		return nil
 	}
-
-	p2pServer := p2p.Server{Config: p2pConfig}
-
-	// make ETH protocols
-	//protos := eth.MakeProtocols()
-
-	err = p2pServer.Start()
-	if err != nil {
-		logger.Crit("Failed to start p2p server", "err", err)
-		return
-	}
-	select {}
-	//
-	//// Initialize the p2p server. This creates the node key and discovery databases.
-	//p2pServer.Config.PrivateKey =
+	app.Run(os.Args)
 
 }
