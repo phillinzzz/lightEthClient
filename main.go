@@ -1,42 +1,25 @@
 package main
 
 import (
-	"fmt"
-	"gopkg.in/urfave/cli.v1"
-	"os"
+	"github.com/ethereum/go-ethereum/p2p"
+	"github.com/phillinzzz/lightEthClient/config"
+	log2 "github.com/phillinzzz/lightEthClient/log"
 )
 
 func main() {
-	var language string
+	logger := log2.GetLogger()
+	p2pCfg, _ := config.GetP2PConfig()
 
-	app := cli.NewApp()
-	app.Name = "LightEthClient"
-	app.Usage = "light weight eth client"
+	p2pServer := p2p.Server{Config: p2pCfg}
 
-	app.Flags = []cli.Flag{
-		cli.StringFlag{
-			Name:        "lang",
-			Usage:       "language for greeting",
-			Value:       "english",
-			Destination: &language,
-		},
+	err := p2pServer.Start()
+	if err != nil {
+		logger.Crit("Failed to start p2p server", "err", err)
+		return
 	}
-
-	app.Action = func(c *cli.Context) error {
-		fmt.Println("the app is running...")
-
-		name := "antonio"
-		if c.NArg() > 0 {
-			name = c.Args()[0]
-		}
-		if c.String("lang") == "spanish" {
-			fmt.Println("hola", name)
-		} else {
-			fmt.Println("hello", name)
-		}
-
-		return nil
-	}
-	app.Run(os.Args)
+	select {}
+	//
+	//// Initialize the p2p server. This creates the node key and discovery databases.
+	//p2pServer.Config.PrivateKey =
 
 }
