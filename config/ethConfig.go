@@ -2,7 +2,10 @@ package config
 
 import (
 	"github.com/ethereum/go-ethereum/cmd/utils"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/forkid"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/eth/ethconfig"
 	"github.com/ethereum/go-ethereum/eth/protocols/eth"
 	"github.com/ethereum/go-ethereum/p2p"
@@ -10,6 +13,14 @@ import (
 	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/ethereum/go-ethereum/params"
 )
+
+// 模拟的txPool
+type fakeTxPool struct {
+}
+
+func (f fakeTxPool) Get(hash common.Hash) *types.Transaction {
+	return nil
+}
 
 func MakeProtocols() ([]p2p.Protocol, error) {
 
@@ -33,28 +44,36 @@ func MakeProtocols() ([]p2p.Protocol, error) {
 			Version: version,
 			Length:  protocolLengths[version],
 			Run: func(p *p2p.Peer, rw p2p.MsgReadWriter) error {
-				peer := eth.NewPeer(version, p, rw, nil)
+				// create the ethPeer
+				peer := eth.NewPeer(version, p, rw, fakeTxPool{})
 				defer peer.Close()
 				//return backend.RunPeer(peer, func(peer *Peer) error {
 				//	return Handle(backend, peer)
 				//})
 
-				// Execute the Ethereum handshake
+				// Execute the Ethereum (block chain) handshake
+				genesisHash := common.HexToHash("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
+				genesis := core.DefaultGenesisBlock()
+				genesisBlock := genesis.ToBlock(nil)
+
 				var (
-					genesis = h.chain.Genesis()
-					head    = h.chain.CurrentHeader()
-					hash    = head.Hash()
-					number  = head.Number.Uint64()
-					td      = h.chain.GetTd(hash, number)
+					head        = genesisBlock.Header()
+					hash        = head.Hash()
+					number      = head.Number.Uint64()
+					td          = genesisBlock.Difficulty()
+					chainConfig = genesis.Config
+					forkFilter  = forkid.NewStaticFilter(chainConfig, genesisHash)
 				)
-				forkID := forkid.NewID(h.chain.Config(), h.chain.Genesis().Hash(), h.chain.CurrentHeader().Number.Uint64())
-				if err := peer.Handshake(h.networkID, td, hash, genesis.Hash(), forkID, h.forkFilter); err != nil {
+				forkID := forkid.NewID(chainConfig, genesisHash, number)
+
+				if err := peer.Handshake(1, td, hash, genesisHash, forkID, forkFilter); err != nil {
 					peer.Log().Debug("Ethereum handshake failed", "err", err)
 					return err
 				}
 
 				return nil
 			},
+
 			NodeInfo: func() interface{} {
 				return nil
 			},
