@@ -46,6 +46,10 @@ func HandlePeer(peer *eth.Peer, rw p2p.MsgReadWriter) error {
 		default:
 			fmt.Printf("Peer:%v just sent a msg: %v!\n", peer.ID(), msg.Code)
 		}
+		err = msg.Discard()
+		if err != nil {
+			return err
+		}
 	}
 }
 
