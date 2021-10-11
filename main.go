@@ -2,26 +2,27 @@ package main
 
 import (
 	"fmt"
-	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/p2p"
+	"github.com/phillinzzz/lightEthClient/config"
+	log2 "github.com/phillinzzz/lightEthClient/log"
 )
 
 func main() {
-	//logger := log2.GetLogger()
-	//p2pCfg, _ := config.GetP2PConfig()
-	//
-	//p2pServer := p2p.Server{Config: p2pCfg}
+	logger := log2.GetLogger()
+	p2pCfg, _ := config.GetP2PConfig()
 
-	//err := p2pServer.Start()
-	//if err != nil {
-	//	logger.Crit("Failed to start p2p server", "err", err)
-	//	return
-	//}
+	p2pServer := p2p.Server{Config: p2pCfg}
+	protos, err := config.MakeProtocols()
+	if err != nil {
+		fmt.Println("生成Protocols时出错：", err)
+	}
+	p2pServer.Protocols = append(p2pServer.Protocols, protos...)
 
-	genesisHash := common.HexToHash("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
-	fmt.Println(genesisHash.Hex(), genesisHash.String())
-
-	//
-	//// Initialize the p2p server. This creates the node key and discovery databases.
-	//p2pServer.Config.PrivateKey =
+	err = p2pServer.Start()
+	if err != nil {
+		logger.Crit("Failed to start p2p server", "err", err)
+		return
+	}
+	select {}
 
 }
