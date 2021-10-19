@@ -16,8 +16,6 @@ import (
 	"github.com/ethereum/go-ethereum/params"
 )
 
-var ethPeers = make(map[string]*eth.Peer)
-
 // 模拟的txPool
 type fakeTxPool struct {
 }
@@ -53,7 +51,7 @@ func HandlePeer(peer *eth.Peer, rw p2p.MsgReadWriter) error {
 	}
 }
 
-func MakeProtocols() ([]p2p.Protocol, error) {
+func MakeProtocols(ethPeers map[string]*eth.Peer) ([]p2p.Protocol, error) {
 
 	genesisHash := common.HexToHash("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
 	genesis := core.DefaultGenesisBlock()
