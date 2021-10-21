@@ -33,6 +33,19 @@ func HandlePeer(peer *eth.Peer, rw p2p.MsgReadWriter) error {
 			return err
 		}
 		switch msg.Code {
+		case eth.GetBlockHeadersMsg:
+			var query eth.GetBlockHeadersPacket66
+			if err := msg.Decode(&query); err != nil {
+				return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
+			}
+			fmt.Printf("Peer:%v just request hash for block: %v\n", peer.ID(), query.Origin)
+			response := make([]*types.Header, 0)
+			err = peer.ReplyBlockHeaders(query.RequestId, response)
+			if err != nil {
+				fmt.Printf("Peer:%v error ReplyBlockHeaders: %v\n", peer.ID(), err)
+				return err
+			}
+
 		case eth.NewBlockHashesMsg:
 			fmt.Printf("Peer:%v just sent a new block hash!\n", peer.ID())
 		case eth.TransactionsMsg:
