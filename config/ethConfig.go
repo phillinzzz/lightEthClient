@@ -41,6 +41,12 @@ func HandlePeer(peer *eth.Peer, rw p2p.MsgReadWriter) error {
 				return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 			}
 			fmt.Printf("Peer:%v just send %v transactions!\n", peer.ID(), len(txs))
+		case eth.PooledTransactionsMsg:
+			var txs eth.PooledTransactionsPacket66
+			if err = msg.Decode(&txs); err != nil {
+				return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
+			}
+			fmt.Printf("Peer:%v just received %v pooled transactions!\n", peer.ID(), len(txs.PooledTransactionsPacket))
 		// 远程节点宣布了一批的交易
 		case eth.NewPooledTransactionHashesMsg:
 			ann := new(eth.NewPooledTransactionHashesPacket)
