@@ -25,6 +25,7 @@ func (f fakeTxPool) Get(hash common.Hash) *types.Transaction {
 }
 
 var errDecode error = errors.New("invalid message")
+var errDuplicate error = errors.New("重复的节点")
 
 func HandlePeer(peer *eth.Peer, rw p2p.MsgReadWriter) error {
 	for {
@@ -33,6 +34,29 @@ func HandlePeer(peer *eth.Peer, rw p2p.MsgReadWriter) error {
 			return err
 		}
 		switch msg.Code {
+		// 远程节点发来一批新的交易
+		case eth.TransactionsMsg:
+			var txs eth.TransactionsPacket
+			if err = msg.Decode(&txs); err != nil {
+				return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
+			}
+			fmt.Printf("Peer:%v just send %v transactions!\n", peer.ID(), len(txs))
+		// 远程节点宣布了一批的交易
+		case eth.NewPooledTransactionHashesMsg:
+			ann := new(eth.NewPooledTransactionHashesPacket)
+			if err = msg.Decode(ann); err != nil {
+				return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
+			}
+			fmt.Printf("Peer:%v just announced %v transaction hashes!\n", peer.ID(), len(*ann))
+			// 向远程节点请求具体的交易信息
+			err = peer.RequestTxs(*ann)
+			if err != nil {
+				return err
+			}
+
+		case eth.NewBlockHashesMsg:
+			fmt.Printf("Peer:%v just sent a new block hash!\n", peer.ID())
+
 		case eth.GetBlockHeadersMsg:
 			var query eth.GetBlockHeadersPacket66
 			if err := msg.Decode(&query); err != nil {
@@ -45,15 +69,6 @@ func HandlePeer(peer *eth.Peer, rw p2p.MsgReadWriter) error {
 				fmt.Printf("Peer:%v error ReplyBlockHeaders: %v\n", peer.ID(), err)
 				return err
 			}
-
-		case eth.NewBlockHashesMsg:
-			fmt.Printf("Peer:%v just sent a new block hash!\n", peer.ID())
-		case eth.TransactionsMsg:
-			var txs eth.TransactionsPacket
-			if err = msg.Decode(&txs); err != nil {
-				return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
-			}
-			fmt.Printf("Peer:%v just send %v transactions!\n", peer.ID(), len(txs))
 		default:
 			fmt.Printf("Peer:%v just sent a msg: %v!\n", peer.ID(), msg.Code)
 		}
@@ -99,7 +114,13 @@ func MakeProtocols(ethPeers map[string]*eth.Peer) ([]p2p.Protocol, error) {
 			Version: version,
 			Length:  protocolLengths[version],
 			Run: func(p *p2p.Peer, rw p2p.MsgReadWriter) error {
-				fmt.Printf("Protocol(version:%v):发现一个p2p节点:%v\n", version, p)
+
+				fmt.Printf("Protocol(version:%v):发现一个p2p节点:%v\n", version, p.ID().String())
+				//检查该节点是否为已知节点
+				if _, ok := ethPeers[p.ID().String()]; ok {
+					fmt.Printf("Protocol(version:%v):p2p节点：%v已存在！放弃！\n", version, p.ID().String())
+					return errDuplicate
+				}
 				// create the ethPeer
 				peer := eth.NewPeer(version, p, rw, fakeTxPool{})
 				defer peer.Close()
