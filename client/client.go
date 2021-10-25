@@ -50,6 +50,30 @@ func (l *Client) Run() {
 		l.logger.Crit("Failed to start p2p server", "err", err)
 		return
 	}
+	go l.knownTxsPoolCleanLoop()
+}
+
+func (l *Client) knownTxsPoolCleanLoop() {
+	fmt.Println("Server:开始启动交易池自动清理循环。。。")
+	ticker := time.NewTicker(time.Minute * 2)
+	defer ticker.Stop()
+	for {
+		<-ticker.C
+		l.safeCleanTxsPool(time.Hour * 1)
+
+	}
+}
+
+func (l *Client) safeCleanTxsPool(maxDuration time.Duration) {
+	l.knownTxsPoolLock.Lock()
+	defer l.knownTxsPoolLock.Unlock()
+	fmt.Printf("Server:开始清理池子内的过期交易，当前池子内交易数量：%v \n！", len(l.knownTxsPool))
+	for txHash, revTime := range l.knownTxsPool {
+		if time.Since(revTime) >= maxDuration {
+			delete(l.knownTxsPool, txHash)
+		}
+	}
+	fmt.Printf("Server:池子内的过期交易清理完成，当前池子内交易数量：%v \n！", len(l.knownTxsPool))
 }
 
 func (l *Client) BroadcastTxs(txs types.Transactions) {
@@ -143,7 +167,7 @@ func (l *Client) makeProtocols() []p2p.Protocol {
 }
 
 // 检测该hash是否已知, true: known; false: unknown
-func (l *Client) safeCheckTxHash(txHash common.Hash) bool {
+func (l *Client) safeHasTx(txHash common.Hash) bool {
 	l.knownTxsPoolLock.RLock()
 	defer l.knownTxsPoolLock.RUnlock()
 	_, ok := l.knownTxsPool[txHash]
@@ -151,21 +175,46 @@ func (l *Client) safeCheckTxHash(txHash common.Hash) bool {
 }
 
 // 将新接收的hash加入knownTxPool
-func (l *Client) safeAddTxHash(txHash common.Hash) {
+func (l *Client) safeAddTx(txHash common.Hash) {
 	l.knownTxsPoolLock.Lock()
 	defer l.knownTxsPoolLock.Unlock()
 	l.knownTxsPool[txHash] = time.Now()
 }
 
+func (l *Client) safeCountTx() int {
+	l.knownTxsPoolLock.RLock()
+	defer l.knownTxsPoolLock.RUnlock()
+	return len(l.knownTxsPool)
+}
+
 func (l *Client) handleNewTxs(peer *eth.Peer, txs types.Transactions) {
+	txsUnknown := make([]common.Hash, 0)
+	fmt.Printf("Peer:%v debug:发送来%v个tx，其中%v个为新的tx!\n", peer.ID(), txs.Len(), len(txsUnknown))
 	for _, tx := range txs {
-		if l.safeCheckTxHash(tx.Hash()) {
-			fmt.Printf("Peer:%v 发送来已知的tx: %v，放弃!\n", peer.ID(), tx.Hash().String())
+		if l.safeHasTx(tx.Hash()) {
+			fmt.Printf("Peer:%v debug:发现一个重复的!\n", peer.ID())
 			continue
 		}
-		l.safeAddTxHash(tx.Hash())
-		fmt.Printf("Peer:%v 发送来新的tx: %v，已加入knownTxPool!\n", peer.ID(), tx.Hash().String())
+		txsUnknown = append(txsUnknown, tx.Hash())
+		l.safeAddTx(tx.Hash())
 	}
+	fmt.Printf("Peer:%v 发送来%v个tx，其中%v个为新的tx!\n", peer.ID(), txs.Len(), len(txsUnknown))
+}
+
+func (l *Client) handleNewAnns(peer *eth.Peer, anns []common.Hash) error {
+	unknownTxsHash := make([]common.Hash, len(anns))
+	for _, ann := range anns {
+		if l.safeHasTx(ann) {
+			continue
+		}
+		unknownTxsHash = append(unknownTxsHash, ann)
+	}
+	// 向远程节点请求具体的交易信息
+	err := peer.RequestTxs(unknownTxsHash)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (l *Client) handlePeer(peer *eth.Peer, rw p2p.MsgReadWriter) error {
@@ -175,7 +224,7 @@ func (l *Client) handlePeer(peer *eth.Peer, rw p2p.MsgReadWriter) error {
 			return err
 		}
 		switch msg.Code {
-		// 远程节点发来一批新的交易
+		// 远程节点向我们广播了一批新的交易
 		case eth.TransactionsMsg:
 			var txs eth.TransactionsPacket
 			if err = msg.Decode(&txs); err != nil {
@@ -183,7 +232,7 @@ func (l *Client) handlePeer(peer *eth.Peer, rw p2p.MsgReadWriter) error {
 			}
 			fmt.Printf("Peer:%v just broadcast %v transactions!\n", peer.ID(), len(txs))
 			l.handleNewTxs(peer, types.Transactions(txs))
-
+		// 远程节点发来我们刚才请求的一批交易
 		case eth.PooledTransactionsMsg:
 			var txs eth.PooledTransactionsPacket66
 			if err = msg.Decode(&txs); err != nil {
@@ -199,7 +248,7 @@ func (l *Client) handlePeer(peer *eth.Peer, rw p2p.MsgReadWriter) error {
 			}
 			fmt.Printf("Peer:%v just announced %v transaction hashes!\n", peer.ID(), len(*ann))
 			// 向远程节点请求具体的交易信息
-			err = peer.RequestTxs(*ann)
+			err = l.handleNewAnns(peer, *ann)
 			if err != nil {
 				return err
 			}
