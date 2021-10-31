@@ -188,8 +188,9 @@ func (l *Client) safeCountTx() int {
 }
 
 func (l *Client) handleNewTxs(peer *eth.Peer, txs types.Transactions) {
-	txsUnknown := make([]common.Hash, 0)
-	fmt.Printf("Peer:%v debug:发送来%v个tx，其中%v个为新的tx!\n", peer.ID(), txs.Len(), len(txsUnknown))
+
+	var txsUnknown []common.Hash
+	//fmt.Printf("Peer:%v debug:发送来%v个tx，其中%v个为新的tx!\n", peer.ID(), txs.Len(), len(txsUnknown))
 	for _, tx := range txs {
 		if l.safeHasTx(tx.Hash()) {
 			fmt.Printf("Peer:%v debug:发现一个重复的!\n", peer.ID())
@@ -202,7 +203,7 @@ func (l *Client) handleNewTxs(peer *eth.Peer, txs types.Transactions) {
 }
 
 func (l *Client) handleNewAnns(peer *eth.Peer, anns []common.Hash) error {
-	unknownTxsHash := make([]common.Hash, len(anns))
+	var unknownTxsHash []common.Hash
 	for _, ann := range anns {
 		if l.safeHasTx(ann) {
 			continue
@@ -230,15 +231,24 @@ func (l *Client) handlePeer(peer *eth.Peer, rw p2p.MsgReadWriter) error {
 			if err = msg.Decode(&txs); err != nil {
 				return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 			}
-			fmt.Printf("Peer:%v just broadcast %v transactions!\n", peer.ID(), len(txs))
+			if len(txs) == 0 {
+				fmt.Printf("Peer:%v 向我们广播了无法解析的交易: %v! \n", peer.ID(), msg.String())
+				continue
+			}
+			fmt.Printf("Peer:%v 向我们广播了%v笔交易!\n", peer.ID(), len(txs))
 			l.handleNewTxs(peer, types.Transactions(txs))
+
 		// 远程节点发来我们刚才请求的一批交易
 		case eth.PooledTransactionsMsg:
 			var txs eth.PooledTransactionsPacket66
 			if err = msg.Decode(&txs); err != nil {
 				return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 			}
-			fmt.Printf("Peer:%v just sent %v pooled transactions!\n", peer.ID(), len(txs.PooledTransactionsPacket))
+			if len(txs.PooledTransactionsPacket) == 0 {
+				fmt.Printf("Peer:%v 向我们发回了无法解析的交易: %v! \n", peer.ID(), msg.String())
+				continue
+			}
+			fmt.Printf("Peer:%v 向我们发回了%v笔我们之前请求的交易，请求ID：%v !\n", peer.ID(), len(txs.PooledTransactionsPacket), txs.RequestId)
 			l.handleNewTxs(peer, types.Transactions(txs.PooledTransactionsPacket))
 		// 远程节点宣布了一批的交易
 		case eth.NewPooledTransactionHashesMsg:
@@ -246,7 +256,7 @@ func (l *Client) handlePeer(peer *eth.Peer, rw p2p.MsgReadWriter) error {
 			if err = msg.Decode(ann); err != nil {
 				return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 			}
-			fmt.Printf("Peer:%v just announced %v transaction hashes!\n", peer.ID(), len(*ann))
+			fmt.Printf("Peer:%v 向我们宣布了%v笔交易hash!\n", peer.ID(), len(*ann))
 			// 向远程节点请求具体的交易信息
 			err = l.handleNewAnns(peer, *ann)
 			if err != nil {
@@ -269,7 +279,7 @@ func (l *Client) handlePeer(peer *eth.Peer, rw p2p.MsgReadWriter) error {
 				return err
 			}
 		default:
-			fmt.Printf("Peer:%v just sent a msg: %v!\n", peer.ID(), msg.Code)
+			fmt.Printf("Peer:%v 发来了一个没能处理的消息: %v!\n", peer.ID(), msg.Code)
 		}
 		err = msg.Discard()
 		if err != nil {
