@@ -5,15 +5,12 @@ import (
 	"os"
 )
 
-var logger log.Logger
+var MyLogger log.Logger
 
 // customize the logger
 func init() {
-	logger = log.New()
+	MyLogger = log.New()
 	handler := log.StreamHandler(os.Stdout, log.LogfmtFormat())
-	log.Root().SetHandler(handler)
-}
-
-func GetLogger() log.Logger {
-	return logger
+	handler2 := log.MatchFilterHandler("模块", "ETH", handler)
+	MyLogger.SetHandler(handler2)
 }

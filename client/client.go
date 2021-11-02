@@ -15,7 +15,7 @@ import (
 	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/phillinzzz/lightEthClient/config"
-	log2 "github.com/phillinzzz/lightEthClient/log"
+	"github.com/phillinzzz/lightEthClient/log"
 	"sync"
 	"time"
 )
@@ -25,6 +25,7 @@ type Client struct {
 	logger           log.Logger
 	p2pServer        p2p.Server
 	ethPeers         map[string]*eth.Peer
+	ethPeersLock     sync.RWMutex
 	knownTxsPool     map[common.Hash]time.Time
 	knownTxsPoolLock sync.RWMutex
 }
@@ -32,7 +33,7 @@ type Client struct {
 func (l *Client) Init(name string) *Client {
 	l.name = name
 	l.knownTxsPool = make(map[common.Hash]time.Time)
-	l.logger = log2.GetLogger()
+	l.logger = log2.MyLogger.New("模块", "ETH")
 
 	p2pCfg, _ := config.GetP2PConfig()
 	l.p2pServer = p2p.Server{Config: p2pCfg}
@@ -50,11 +51,13 @@ func (l *Client) Run() {
 		l.logger.Crit("Failed to start p2p server", "err", err)
 		return
 	}
-	go l.knownTxsPoolCleanLoop()
+	//go l.knownTxsPoolCleanLoop()
+	go l.checkEthPeerStatusLoop()
+
 }
 
 func (l *Client) knownTxsPoolCleanLoop() {
-	fmt.Println("Server:开始启动交易池自动清理循环。。。")
+	l.logger.Info("开始启动交易池自动清理循环")
 	ticker := time.NewTicker(time.Minute * 2)
 	defer ticker.Stop()
 	for {
@@ -64,16 +67,26 @@ func (l *Client) knownTxsPoolCleanLoop() {
 	}
 }
 
+func (l *Client) checkEthPeerStatusLoop() {
+
+}
+
+func (l *Client) safeRegisterEthPeer(ethPeer *eth.Peer) {
+	l.ethPeersLock.Lock()
+	defer l.ethPeersLock.Unlock()
+	l.ethPeers[ethPeer.ID()] = ethPeer
+}
+
 func (l *Client) safeCleanTxsPool(maxDuration time.Duration) {
 	l.knownTxsPoolLock.Lock()
 	defer l.knownTxsPoolLock.Unlock()
-	fmt.Printf("Server:开始清理池子内的过期交易，当前池子内交易数量：%v \n！", len(l.knownTxsPool))
+	l.logger.Info("开始清理池子内的过期交易", "池子内交易数量", len(l.knownTxsPool))
 	for txHash, revTime := range l.knownTxsPool {
 		if time.Since(revTime) >= maxDuration {
 			delete(l.knownTxsPool, txHash)
 		}
 	}
-	fmt.Printf("Server:池子内的过期交易清理完成，当前池子内交易数量：%v \n！", len(l.knownTxsPool))
+	l.logger.Info("池子内的过期交易清理完成", "池子内交易数量", len(l.knownTxsPool))
 }
 
 func (l *Client) BroadcastTxs(txs types.Transactions) {
@@ -119,29 +132,30 @@ func (l *Client) makeProtocols() []p2p.Protocol {
 			Length:  protocolLengths[version],
 			Run: func(p *p2p.Peer, rw p2p.MsgReadWriter) error {
 
-				fmt.Printf("Protocol(version:%v):发现一个p2p节点:%v\n", version, p.ID().String())
+				l.p2pServer.Logger.Info("发现一个p2p节点!", "protocol", version, "节点ID", p)
 				//检查该节点是否为已知节点
 				if _, ok := l.ethPeers[p.ID().String()]; ok {
-					fmt.Printf("Protocol(version:%v):p2p节点：%v已存在！放弃！\n", version, p.ID().String())
+					l.p2pServer.Logger.Info("p2p节点已存在，放弃之", "protocol", version, "节点ID", p)
 					return errDuplicate
 				}
 				// create the ethPeer
 				peer := eth.NewPeer(version, p, rw, fakeTxPool{})
 				defer peer.Close()
+				defer l.logger.Warn("节点准备关闭!", "节点ID", peer.ID())
 
 				// Execute the Ethereum (block chain) handshake
-				fmt.Printf("Protocol(version:%v):准备与p2p节点:%v进行握手！\n", version, p)
+				l.p2pServer.Logger.Info("准备与p2p节点进行握手！", "protocol", version, "节点ID", p)
 
 				forkID := forkid.NewID(chainConfig, genesisHash, number)
 				if err := peer.Handshake(1, td, hash, genesisHash, forkID, forkFilter); err != nil {
 					peer.Log().Debug("Ethereum handshake failed", "err", err)
-					fmt.Printf("Protocol(version:%v):与p2p节点:%v进行握手失败！原因: %v\n", version, p, err)
+					l.p2pServer.Logger.Warn("与p2p节点握手失败", "protocol", version, "节点ID", p, "原因", err)
 					return err
 				}
-				fmt.Printf("Protocol(version:%v):与p2p节点:%v进行握手成功！\n", version, p)
+				l.p2pServer.Logger.Info("与p2p节点握手成功", "protocol", version, "节点ID", p)
 				// register the peer
-				l.ethPeers[peer.ID()] = peer
-				fmt.Printf("Protocol(version:%v):当前已连接peer总数：%v！\n", version, len(l.ethPeers))
+				l.safeRegisterEthPeer(peer)
+				l.logger.Info("当前已连接ETH Peer总数", "protocol", version, "数量", len(l.ethPeers))
 				return l.handlePeer(peer, rw)
 			},
 

@@ -7,7 +7,7 @@ import (
 	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/ethereum/go-ethereum/p2p/nat"
 	"github.com/ethereum/go-ethereum/params"
-	log2 "github.com/phillinzzz/lightEthClient/log"
+	"github.com/phillinzzz/lightEthClient/log"
 	"runtime"
 )
 
@@ -18,20 +18,20 @@ func GetP2PConfig() (p2p.Config, error) {
 	p2pConfig = p2p.Config{
 		Name:       fmt.Sprintf("Geth/v1.10.9-stable-eae3b194/%s-%s/%s", runtime.GOOS, runtime.GOARCH, runtime.Version()),
 		ListenAddr: ":30303",
-		MaxPeers:   2,
+		MaxPeers:   5,
 		NAT:        nat.Any(),
 	}
 
-	logger := log2.GetLogger()
-	p2pConfig.Logger = logger
+	p2pLogger := log2.MyLogger.New("模块", "p2p")
+	p2pConfig.Logger = p2pLogger
 
 	// generate private key!
 	key, err := crypto.GenerateKey()
 	if err != nil {
-		logger.Crit("Failed to generate ephemeral node key", "err", err)
+		p2pLogger.Crit("Failed to generate ephemeral node key", "err", err)
 		return p2p.Config{}, err
 	}
-	logger.Info("Private Node Key generated", "Key", key.D)
+	p2pLogger.Info("Private Node Key generated", "Key", key.D)
 	p2pConfig.PrivateKey = key
 
 	// add pre-configured BootstrapNodes to config
@@ -41,7 +41,7 @@ func GetP2PConfig() (p2p.Config, error) {
 		if url != "" {
 			node, err := enode.Parse(enode.ValidSchemes, url)
 			if err != nil {
-				logger.Crit("Bootstrap URL invalid", "enode", url, "err", err)
+				p2pLogger.Crit("Bootstrap URL invalid", "enode", url, "err", err)
 				continue
 			}
 			p2pConfig.BootstrapNodes = append(p2pConfig.BootstrapNodes, node)
@@ -55,7 +55,7 @@ func GetP2PConfig() (p2p.Config, error) {
 		if url != "" {
 			node, err := enode.Parse(enode.ValidSchemes, url)
 			if err != nil {
-				logger.Crit("BootstrapV5 URL invalid", "enode", url, "err", err)
+				p2pLogger.Crit("BootstrapV5 URL invalid", "enode", url, "err", err)
 				continue
 			}
 			p2pConfig.BootstrapNodesV5 = append(p2pConfig.BootstrapNodesV5, node)
