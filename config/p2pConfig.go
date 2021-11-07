@@ -18,7 +18,7 @@ func GetP2PConfig() (p2p.Config, error) {
 	p2pConfig = p2p.Config{
 		Name:       fmt.Sprintf("Geth/v1.10.9-stable-eae3b194/%s-%s/%s", runtime.GOOS, runtime.GOARCH, runtime.Version()),
 		ListenAddr: ":30303",
-		MaxPeers:   5,
+		MaxPeers:   50,
 		NAT:        nat.Any(),
 	}
 

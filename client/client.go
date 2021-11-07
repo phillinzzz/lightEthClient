@@ -25,6 +25,7 @@ type Client struct {
 	logger           log.Logger
 	p2pServer        p2p.Server
 	ethPeers         map[string]*eth.Peer
+	ethPeersCheck    map[string]time.Time
 	ethPeersLock     sync.RWMutex
 	knownTxsPool     map[common.Hash]time.Time
 	knownTxsPoolLock sync.RWMutex
@@ -39,6 +40,7 @@ func (l *Client) Init(name string) *Client {
 	l.p2pServer = p2p.Server{Config: p2pCfg}
 
 	l.ethPeers = make(map[string]*eth.Peer)
+	l.ethPeersCheck = make(map[string]time.Time)
 
 	protos := l.makeProtocols()
 	l.p2pServer.Protocols = protos
@@ -51,8 +53,8 @@ func (l *Client) Run() {
 		l.logger.Crit("Failed to start p2p server", "err", err)
 		return
 	}
-	//go l.knownTxsPoolCleanLoop()
-	go l.checkEthPeerStatusLoop()
+	go l.knownTxsPoolCleanLoop()
+	go l.ethPeerCleanLoop(time.Minute*2, time.Minute*2)
 
 }
 
@@ -62,19 +64,64 @@ func (l *Client) knownTxsPoolCleanLoop() {
 	defer ticker.Stop()
 	for {
 		<-ticker.C
-		l.safeCleanTxsPool(time.Hour * 1)
+		l.safeCleanTxsPool(time.Minute * 5)
 
 	}
 }
 
-func (l *Client) checkEthPeerStatusLoop() {
+// 定期清理掉没有反应的远程节点
+func (l *Client) ethPeerCleanLoop(maxTimeNoComm, loopTime time.Duration) {
+	ticker := time.NewTicker(loopTime)
+	for _ = range ticker.C {
+		l.ethPeersLock.RLock()
+		l.logger.Info("节点情况汇报", "节点总数", len(l.ethPeers))
+		for peerName, t := range l.ethPeersCheck {
+			l.logger.Info("节点情况汇报：", "节点ID", peerName[:10], "最近交流时间", time.Since(t))
 
+			//移除长时间没有通信的远程节点
+			if time.Since(t) > maxTimeNoComm {
+				l.logger.Info("移除长时间没有通信的节点", "节点ID", peerName[:10])
+
+				l.ethPeers[peerName].Disconnect(p2p.DiscUselessPeer)
+				delete(l.ethPeers, peerName)
+			}
+		}
+
+		l.ethPeersLock.RUnlock()
+	}
+
+}
+
+func (l *Client) safeUpdateEthPeerStatus(peer *eth.Peer) {
+	l.ethPeersLock.Lock()
+	defer l.ethPeersLock.Unlock()
+	l.ethPeersCheck[peer.ID()] = time.Now()
+}
+
+func (l *Client) safeCheckPeerDuplicate(peer *p2p.Peer) error {
+	l.ethPeersLock.RLock()
+	defer l.ethPeersLock.RUnlock()
+	if _, ok := l.ethPeers[peer.ID().String()]; ok {
+		l.p2pServer.Logger.Info("p2p节点已存在，放弃之", "节点ID", peer.ID().String())
+		return errDuplicate
+	}
+	return nil
 }
 
 func (l *Client) safeRegisterEthPeer(ethPeer *eth.Peer) {
 	l.ethPeersLock.Lock()
 	defer l.ethPeersLock.Unlock()
 	l.ethPeers[ethPeer.ID()] = ethPeer
+	l.ethPeersCheck[ethPeer.ID()] = time.Now()
+	l.logger.Info("新ETH节点注册成功，当前已连接ETH Peer总数", "数量", len(l.ethPeers))
+}
+
+func (l *Client) safeUnregisterEthPeer(ethPeer *eth.Peer) {
+	l.ethPeersLock.Lock()
+	defer l.ethPeersLock.Unlock()
+	delete(l.ethPeers, ethPeer.ID())
+	delete(l.ethPeersCheck, ethPeer.ID())
+	l.logger.Info("ETH节点移除完成，当前已连接ETH Peer总数", "数量", len(l.ethPeers))
 }
 
 func (l *Client) safeCleanTxsPool(maxDuration time.Duration) {
@@ -102,6 +149,7 @@ func (l *Client) makeProtocols() []p2p.Protocol {
 	genesis := core.DefaultGenesisBlock()
 	genesisBlock := genesis.ToBlock(nil)
 
+	// 握手需要的信息
 	var (
 		head        = genesisBlock.Header()
 		hash        = head.Hash()
@@ -130,32 +178,31 @@ func (l *Client) makeProtocols() []p2p.Protocol {
 			Name:    protocolName,
 			Version: version,
 			Length:  protocolLengths[version],
+			// Run函数用来初始化p2p节点并将其升级为ethPeer。Run函数执行后，就有了ethPeer。当Run函数返回以后，ethPeer也就已经关闭了
 			Run: func(p *p2p.Peer, rw p2p.MsgReadWriter) error {
 
-				l.p2pServer.Logger.Info("发现一个p2p节点!", "protocol", version, "节点ID", p)
+				l.logger.Info("发现一个p2p节点!", "protocol", version, "节点ID", p.ID().String()[:10])
 				//检查该节点是否为已知节点
-				if _, ok := l.ethPeers[p.ID().String()]; ok {
-					l.p2pServer.Logger.Info("p2p节点已存在，放弃之", "protocol", version, "节点ID", p)
-					return errDuplicate
+				if err := l.safeCheckPeerDuplicate(p); err != nil {
+					l.logger.Info("p2p节点已存在！", "节点ID", p.ID().String()[:10])
+					return err
 				}
 				// create the ethPeer
 				peer := eth.NewPeer(version, p, rw, fakeTxPool{})
 				defer peer.Close()
-				defer l.logger.Warn("节点准备关闭!", "节点ID", peer.ID())
-
 				// Execute the Ethereum (block chain) handshake
-				l.p2pServer.Logger.Info("准备与p2p节点进行握手！", "protocol", version, "节点ID", p)
-
+				//l.logger.Info("准备与p2p节点进行握手！", "protocol", version, "节点ID", p.ID().String()[:10])
 				forkID := forkid.NewID(chainConfig, genesisHash, number)
 				if err := peer.Handshake(1, td, hash, genesisHash, forkID, forkFilter); err != nil {
-					peer.Log().Debug("Ethereum handshake failed", "err", err)
-					l.p2pServer.Logger.Warn("与p2p节点握手失败", "protocol", version, "节点ID", p, "原因", err)
+					l.logger.Info("与p2p节点握手失败", "protocol", version, "节点ID", p.ID().String()[:10], "原因", err)
 					return err
 				}
-				l.p2pServer.Logger.Info("与p2p节点握手成功", "protocol", version, "节点ID", p)
+				l.logger.Info("与p2p节点握手成功", "protocol", version, "节点ID", p.ID().String()[:10])
 				// register the peer
 				l.safeRegisterEthPeer(peer)
-				l.logger.Info("当前已连接ETH Peer总数", "protocol", version, "数量", len(l.ethPeers))
+				defer l.safeUnregisterEthPeer(peer)
+				defer l.logger.Warn("EthPeer准备关闭!", "节点ID", peer.ID()[:10])
+
 				return l.handlePeer(peer, rw)
 			},
 
@@ -201,19 +248,24 @@ func (l *Client) safeCountTx() int {
 	return len(l.knownTxsPool)
 }
 
-func (l *Client) handleNewTxs(peer *eth.Peer, txs types.Transactions) {
+func (l *Client) handleNewTxs(peer *eth.Peer, txs types.Transactions, requestID uint64) {
 
 	var txsUnknown []common.Hash
 	//fmt.Printf("Peer:%v debug:发送来%v个tx，其中%v个为新的tx!\n", peer.ID(), txs.Len(), len(txsUnknown))
 	for _, tx := range txs {
 		if l.safeHasTx(tx.Hash()) {
-			fmt.Printf("Peer:%v debug:发现一个重复的!\n", peer.ID())
+			//l.logger.Info("收到了重复交易！", "节点ID", peer.ID())
 			continue
 		}
 		txsUnknown = append(txsUnknown, tx.Hash())
 		l.safeAddTx(tx.Hash())
 	}
-	fmt.Printf("Peer:%v 发送来%v个tx，其中%v个为新的tx!\n", peer.ID(), txs.Len(), len(txsUnknown))
+	if requestID != 0 {
+		l.logger.Debug("远程节点返回了请求的交易！", "节点ID", peer.ID()[:10], "请求ID", requestID, "新交易数量", len(txsUnknown), "总数量", txs.Len())
+	} else {
+		l.logger.Debug("远程节点广播来一批交易！", "节点ID", peer.ID()[:10], "新交易数量", len(txsUnknown), "总数量", txs.Len())
+	}
+
 }
 
 func (l *Client) handleNewAnns(peer *eth.Peer, anns []common.Hash) error {
@@ -223,6 +275,10 @@ func (l *Client) handleNewAnns(peer *eth.Peer, anns []common.Hash) error {
 			continue
 		}
 		unknownTxsHash = append(unknownTxsHash, ann)
+	}
+	l.logger.Debug("远程节点宣布了一批hash！", "节点ID", peer.ID()[:10], "未知HASH数量", len(unknownTxsHash), "总数量", len(anns))
+	if len(unknownTxsHash) == 1 {
+		l.logger.Debug("宣布的hash内容", "节点ID", peer.ID()[:10], "hash", unknownTxsHash[0])
 	}
 	// 向远程节点请求具体的交易信息
 	err := peer.RequestTxs(unknownTxsHash)
@@ -238,62 +294,62 @@ func (l *Client) handlePeer(peer *eth.Peer, rw p2p.MsgReadWriter) error {
 		if err != nil {
 			return err
 		}
+		// 更新节点的存活情况信息
+		l.safeUpdateEthPeerStatus(peer)
+
 		switch msg.Code {
 		// 远程节点向我们广播了一批新的交易
 		case eth.TransactionsMsg:
 			var txs eth.TransactionsPacket
 			if err = msg.Decode(&txs); err != nil {
+				l.logger.Crit("远程节点发来新交易的解析失败！", "节点ID", peer.ID()[:10])
 				return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 			}
 			if len(txs) == 0 {
-				fmt.Printf("Peer:%v 向我们广播了无法解析的交易: %v! \n", peer.ID(), msg.String())
+				l.logger.Warn("远程节点发来的交易解析出0个交易！", "节点ID", peer.ID()[:10])
 				continue
 			}
-			fmt.Printf("Peer:%v 向我们广播了%v笔交易!\n", peer.ID(), len(txs))
-			l.handleNewTxs(peer, types.Transactions(txs))
+			l.handleNewTxs(peer, types.Transactions(txs), 0)
 
 		// 远程节点发来我们刚才请求的一批交易
 		case eth.PooledTransactionsMsg:
 			var txs eth.PooledTransactionsPacket66
 			if err = msg.Decode(&txs); err != nil {
+				l.logger.Crit("远程节点返回的我们之前请求的交易解析失败！", "节点ID", peer.ID()[:10])
 				return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 			}
 			if len(txs.PooledTransactionsPacket) == 0 {
-				fmt.Printf("Peer:%v 向我们发回了无法解析的交易: %v! \n", peer.ID(), msg.String())
+				//l.logger.Warn("远程节点返回的交易解析出0个交易！", "节点ID", peer.ID())
+				l.logger.Debug("远程节点向我们返回了请求的交易！", "节点ID", peer.ID()[:10], "请求ID", txs.RequestId, "交易数量", len(txs.PooledTransactionsPacket))
 				continue
 			}
-			fmt.Printf("Peer:%v 向我们发回了%v笔我们之前请求的交易，请求ID：%v !\n", peer.ID(), len(txs.PooledTransactionsPacket), txs.RequestId)
-			l.handleNewTxs(peer, types.Transactions(txs.PooledTransactionsPacket))
+			l.handleNewTxs(peer, types.Transactions(txs.PooledTransactionsPacket), txs.RequestId)
 		// 远程节点宣布了一批的交易
 		case eth.NewPooledTransactionHashesMsg:
 			ann := new(eth.NewPooledTransactionHashesPacket)
 			if err = msg.Decode(ann); err != nil {
 				return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 			}
-			fmt.Printf("Peer:%v 向我们宣布了%v笔交易hash!\n", peer.ID(), len(*ann))
+
 			// 向远程节点请求具体的交易信息
 			err = l.handleNewAnns(peer, *ann)
 			if err != nil {
 				return err
 			}
-
-		case eth.NewBlockHashesMsg:
-			fmt.Printf("Peer:%v just sent a new block hash!\n", peer.ID())
-
+		//	握手阶段远程节点会请求我们的block头，我们给他返回nil
 		case eth.GetBlockHeadersMsg:
 			var query eth.GetBlockHeadersPacket66
 			if err := msg.Decode(&query); err != nil {
 				return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 			}
-			fmt.Printf("Peer:%v just request hash for block: %v\n", peer.ID(), query.Origin)
+			l.logger.Debug("远程节点请求我们发送block头！", "节点ID", peer.ID()[:10], "block高度", query.Origin)
 			response := make([]*types.Header, 0)
 			err = peer.ReplyBlockHeaders(query.RequestId, response)
 			if err != nil {
-				fmt.Printf("Peer:%v error ReplyBlockHeaders: %v\n", peer.ID(), err)
 				return err
 			}
 		default:
-			fmt.Printf("Peer:%v 发来了一个没能处理的消息: %v!\n", peer.ID(), msg.Code)
+			l.logger.Debug("远程节点发来一个不能处理的消息！", "节点ID", peer.ID()[:10], "请求代码", msg.Code)
 		}
 		err = msg.Discard()
 		if err != nil {
