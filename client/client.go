@@ -21,7 +21,6 @@ import (
 )
 
 type Client struct {
-	name             string
 	logger           log.Logger
 	p2pServer        p2p.Server
 	ethPeers         map[string]*eth.Peer
@@ -31,12 +30,12 @@ type Client struct {
 	knownTxsPoolLock sync.RWMutex
 }
 
-func (l *Client) Init(name string) *Client {
-	l.name = name
+func (l *Client) Init(name config.ChainName) *Client {
+
 	l.knownTxsPool = make(map[common.Hash]time.Time)
 	l.logger = log2.MyLogger.New("模块", "ETH")
 
-	p2pCfg, _ := config.GetP2PConfig()
+	p2pCfg, _ := config.GetP2PConfig(name)
 	l.p2pServer = p2p.Server{Config: p2pCfg}
 
 	l.ethPeers = make(map[string]*eth.Peer)
@@ -166,9 +165,10 @@ func (l *Client) makeProtocols() []p2p.Protocol {
 	dnsclient := dnsdisc.NewClient(dnsdisc.Config{})
 	ethDialCandidates, _ := dnsclient.NewIterator(ethConfig.EthDiscoveryURLs...)
 
-	protocolVersions := eth.ProtocolVersions
+	//protocolVersions := eth.ProtocolVersions
+	protocolVersions := []uint{67, 66, 65}
 	protocolName := eth.ProtocolName
-	protocolLengths := map[uint]uint64{eth.ETH66: 17, 65: 17}
+	protocolLengths := map[uint]uint64{67: 18, eth.ETH66: 17, 65: 17}
 
 	Protocols := make([]p2p.Protocol, len(protocolVersions))
 	for i, version := range protocolVersions {

@@ -13,15 +13,45 @@ import (
 
 var p2pConfig p2p.Config
 
-func GetP2PConfig() (p2p.Config, error) {
+type ChainName uint8
+
+const (
+	ETH ChainName = iota
+	BSC
+	HECO
+)
+
+func GetP2PConfig(name ChainName) (p2p.Config, error) {
+
+	// 列出全部因链而异的参数,默认值为eth主链参数
+	var (
+		listenAddr  = ":30303"
+		maxPeers    = 50
+		bootNodes   = params.MainnetBootnodes
+		bootNodesV5 = params.V5Bootnodes
+		staticNodes []string
+	)
+
+	switch name {
+	case ETH:
+
+	case BSC:
+		listenAddr = BSCListenAddr
+		maxPeers = BSCMaxPeers
+		bootNodes = BSCBootnodes
+		staticNodes = BSCStaticNodes
+	case HECO:
+
+	}
 
 	p2pConfig = p2p.Config{
 		Name:       fmt.Sprintf("Geth/v1.10.9-stable-eae3b194/%s-%s/%s", runtime.GOOS, runtime.GOARCH, runtime.Version()),
-		ListenAddr: ":30303",
-		MaxPeers:   50,
+		ListenAddr: listenAddr,
+		MaxPeers:   maxPeers,
 		NAT:        nat.Any(),
 	}
 
+	// 配置p2p模块的logger，作为全局logger的子logger
 	p2pLogger := log2.MyLogger.New("模块", "p2p")
 	p2pConfig.Logger = p2pLogger
 
@@ -35,9 +65,8 @@ func GetP2PConfig() (p2p.Config, error) {
 	p2pConfig.PrivateKey = key
 
 	// add pre-configured BootstrapNodes to config
-	urls := params.MainnetBootnodes
-	p2pConfig.BootstrapNodes = make([]*enode.Node, 0, len(urls))
-	for _, url := range urls {
+	p2pConfig.BootstrapNodes = make([]*enode.Node, 0, len(bootNodes))
+	for _, url := range bootNodes {
 		if url != "" {
 			node, err := enode.Parse(enode.ValidSchemes, url)
 			if err != nil {
@@ -49,9 +78,8 @@ func GetP2PConfig() (p2p.Config, error) {
 	}
 
 	// add pre-configured BootstrapNodesV5 to config
-	urls2 := params.V5Bootnodes
-	p2pConfig.BootstrapNodesV5 = make([]*enode.Node, 0, len(urls2))
-	for _, url := range urls {
+	p2pConfig.BootstrapNodesV5 = make([]*enode.Node, 0, len(bootNodesV5))
+	for _, url := range bootNodesV5 {
 		if url != "" {
 			node, err := enode.Parse(enode.ValidSchemes, url)
 			if err != nil {
@@ -59,6 +87,19 @@ func GetP2PConfig() (p2p.Config, error) {
 				continue
 			}
 			p2pConfig.BootstrapNodesV5 = append(p2pConfig.BootstrapNodesV5, node)
+		}
+	}
+
+	// add pre-configured StaticNodes to config
+	p2pConfig.StaticNodes = make([]*enode.Node, 0, len(staticNodes))
+	for _, url := range staticNodes {
+		if url != "" {
+			node, err := enode.Parse(enode.ValidSchemes, url)
+			if err != nil {
+				p2pLogger.Crit("StaticNode URL invalid", "enode", url, "err", err)
+				continue
+			}
+			p2pConfig.StaticNodes = append(p2pConfig.StaticNodes, node)
 		}
 	}
 
