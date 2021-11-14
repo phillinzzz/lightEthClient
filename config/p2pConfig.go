@@ -7,21 +7,14 @@ import (
 	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/ethereum/go-ethereum/p2p/nat"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/phillinzzz/lightEthClient/config/bscConfig"
 	"github.com/phillinzzz/lightEthClient/log"
 	"runtime"
 )
 
 var p2pConfig p2p.Config
 
-type ChainName uint8
-
-const (
-	ETH ChainName = iota
-	BSC
-	HECO
-)
-
-func GetP2PConfig(name ChainName) (p2p.Config, error) {
+func GetP2PConfig(chainId ChainID) (p2p.Config, error) {
 
 	// 列出全部因链而异的参数,默认值为eth主链参数
 	var (
@@ -32,14 +25,14 @@ func GetP2PConfig(name ChainName) (p2p.Config, error) {
 		staticNodes []string
 	)
 
-	switch name {
+	switch chainId {
 	case ETH:
 
 	case BSC:
-		listenAddr = BSCListenAddr
-		maxPeers = BSCMaxPeers
-		bootNodes = BSCBootnodes
-		staticNodes = BSCStaticNodes
+		listenAddr = bscConfig.BSCListenAddr
+		maxPeers = bscConfig.BSCMaxPeers
+		bootNodes = bscConfig.BSCBootnodes
+		staticNodes = bscConfig.BSCStaticNodes
 	case HECO:
 
 	}

@@ -1,4 +1,11 @@
-package config
+package bscConfig
+
+import (
+	"encoding/json"
+	"github.com/ethereum/go-ethereum/cmd/utils"
+	"github.com/ethereum/go-ethereum/core"
+	"os"
+)
 
 var (
 	BSCBootnodes = []string{
@@ -38,3 +45,19 @@ var (
 
 	BSCMaxPeers = 30
 )
+
+func MakeBSCGenesis() *core.Genesis {
+
+	file, err := os.Open("config/bscConfig/genesis.json")
+	if err != nil {
+		utils.Fatalf("Failed to read genesis file: %v", err)
+	}
+	defer file.Close()
+
+	genesis := new(core.Genesis)
+	if err := json.NewDecoder(file).Decode(genesis); err != nil {
+		utils.Fatalf("invalid genesis file: %v", err)
+	}
+	return genesis
+
+}

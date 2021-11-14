@@ -13,14 +13,15 @@ import (
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/p2p/dnsdisc"
 	"github.com/ethereum/go-ethereum/p2p/enode"
-	"github.com/ethereum/go-ethereum/params"
 	"github.com/phillinzzz/lightEthClient/config"
+	"github.com/phillinzzz/lightEthClient/config/bscConfig"
 	"github.com/phillinzzz/lightEthClient/log"
 	"sync"
 	"time"
 )
 
 type Client struct {
+	chainId          config.ChainID
 	logger           log.Logger
 	p2pServer        p2p.Server
 	ethPeers         map[string]*eth.Peer
@@ -30,12 +31,12 @@ type Client struct {
 	knownTxsPoolLock sync.RWMutex
 }
 
-func (l *Client) Init(name config.ChainName) *Client {
-
+func (l *Client) Init(chainId config.ChainID) *Client {
+	l.chainId = chainId
 	l.knownTxsPool = make(map[common.Hash]time.Time)
 	l.logger = log2.MyLogger.New("模块", "ETH")
 
-	p2pCfg, _ := config.GetP2PConfig(name)
+	p2pCfg, _ := config.GetP2PConfig(chainId)
 	l.p2pServer = p2p.Server{Config: p2pCfg}
 
 	l.ethPeers = make(map[string]*eth.Peer)
@@ -144,8 +145,20 @@ func (l *Client) BroadcastTxs(txs types.Transactions) {
 
 func (l *Client) makeProtocols() []p2p.Protocol {
 
-	genesisHash := common.HexToHash("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
-	genesis := core.DefaultGenesisBlock()
+	// 创世区块
+	var genesis *core.Genesis
+
+	// 生成创世区块
+	switch l.chainId {
+	case config.ETH:
+		genesis = core.DefaultGenesisBlock()
+	case config.BSC:
+		genesis = bscConfig.MakeBSCGenesis()
+	default:
+		l.logger.Crit("未配置网络参数！", "ChainID", l.chainId)
+	}
+
+	//genesisHash := common.HexToHash("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
 	genesisBlock := genesis.ToBlock(nil)
 
 	// 握手需要的信息
@@ -155,20 +168,23 @@ func (l *Client) makeProtocols() []p2p.Protocol {
 		number      = head.Number.Uint64()
 		td          = genesisBlock.Difficulty()
 		chainConfig = genesis.Config
-		forkFilter  = forkid.NewStaticFilter(chainConfig, genesisHash)
+		forkFilter  = forkid.NewStaticFilter(chainConfig, genesisBlock.Hash())
 	)
 
 	ethConfig := ethconfig.Defaults
-	utils.SetDNSDiscoveryDefaults(&ethConfig, params.MainnetGenesisHash)
+	//eth主网有DNS节点列表功能，bsc网络没有此功能
+	if l.chainId == config.ETH {
+		utils.SetDNSDiscoveryDefaults(&ethConfig, genesisBlock.Hash())
+	}
 
-	// Setup DNS discovery iterators.
+	// Setup DNS discovery iterators. 只对ETH主网起效果。
 	dnsclient := dnsdisc.NewClient(dnsdisc.Config{})
 	ethDialCandidates, _ := dnsclient.NewIterator(ethConfig.EthDiscoveryURLs...)
 
 	//protocolVersions := eth.ProtocolVersions
 	protocolVersions := []uint{67, 66, 65}
-	protocolName := eth.ProtocolName
-	protocolLengths := map[uint]uint64{67: 18, eth.ETH66: 17, 65: 17}
+	protocolName := "eth"
+	protocolLengths := map[uint]uint64{67: 18, 66: 17, 65: 17}
 
 	Protocols := make([]p2p.Protocol, len(protocolVersions))
 	for i, version := range protocolVersions {
@@ -192,8 +208,8 @@ func (l *Client) makeProtocols() []p2p.Protocol {
 				defer peer.Close()
 				// Execute the Ethereum (block chain) handshake
 				//l.logger.Info("准备与p2p节点进行握手！", "protocol", version, "节点ID", p.ID().String()[:10])
-				forkID := forkid.NewID(chainConfig, genesisHash, number)
-				if err := peer.Handshake(1, td, hash, genesisHash, forkID, forkFilter); err != nil {
+				forkID := forkid.NewID(chainConfig, genesisBlock.Hash(), number)
+				if err := peer.Handshake(uint64(l.chainId), td, hash, genesisBlock.Hash(), forkID, forkFilter); err != nil {
 					l.logger.Info("与p2p节点握手失败", "protocol", version, "节点ID", p.ID().String()[:10], "原因", err)
 					return err
 				}
@@ -208,9 +224,9 @@ func (l *Client) makeProtocols() []p2p.Protocol {
 
 			NodeInfo: func() interface{} {
 				return &eth.NodeInfo{
-					Network:    1,
+					Network:    uint64(l.chainId),
 					Difficulty: td,
-					Genesis:    genesisHash,
+					Genesis:    genesisBlock.Hash(),
 					Config:     chainConfig,
 					Head:       head.Hash(),
 				}
