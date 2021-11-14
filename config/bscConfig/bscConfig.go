@@ -2,8 +2,8 @@ package bscConfig
 
 import (
 	"encoding/json"
-	"github.com/ethereum/go-ethereum/cmd/utils"
-	"github.com/ethereum/go-ethereum/core"
+	"github.com/phillinzzz/newBsc/cmd/utils"
+	"github.com/phillinzzz/newBsc/core"
 	"os"
 )
 

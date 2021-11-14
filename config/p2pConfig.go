@@ -2,13 +2,13 @@ package config
 
 import (
 	"fmt"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/p2p"
-	"github.com/ethereum/go-ethereum/p2p/enode"
-	"github.com/ethereum/go-ethereum/p2p/nat"
-	"github.com/ethereum/go-ethereum/params"
 	"github.com/phillinzzz/lightEthClient/config/bscConfig"
 	"github.com/phillinzzz/lightEthClient/log"
+	"github.com/phillinzzz/newBsc/crypto"
+	"github.com/phillinzzz/newBsc/p2p"
+	"github.com/phillinzzz/newBsc/p2p/enode"
+	"github.com/phillinzzz/newBsc/p2p/nat"
+	"github.com/phillinzzz/newBsc/params"
 	"runtime"
 )
 

@@ -1,7 +1,7 @@
 package log2
 
 import (
-	"github.com/ethereum/go-ethereum/log"
+	"github.com/phillinzzz/newBsc/log"
 	"os"
 )
 

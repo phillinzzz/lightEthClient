@@ -1,8 +1,8 @@
 package client
 
 import (
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/phillinzzz/newBsc/common"
+	"github.com/phillinzzz/newBsc/core/types"
 )
 
 // 模拟的txPool

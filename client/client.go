@@ -2,20 +2,20 @@ package client
 
 import (
 	"fmt"
-	"github.com/ethereum/go-ethereum/cmd/utils"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core"
-	"github.com/ethereum/go-ethereum/core/forkid"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/eth/ethconfig"
-	"github.com/ethereum/go-ethereum/eth/protocols/eth"
-	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/p2p"
-	"github.com/ethereum/go-ethereum/p2p/dnsdisc"
-	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/phillinzzz/lightEthClient/config"
 	"github.com/phillinzzz/lightEthClient/config/bscConfig"
 	"github.com/phillinzzz/lightEthClient/log"
+	"github.com/phillinzzz/newBsc/cmd/utils"
+	"github.com/phillinzzz/newBsc/common"
+	"github.com/phillinzzz/newBsc/core"
+	"github.com/phillinzzz/newBsc/core/forkid"
+	"github.com/phillinzzz/newBsc/core/types"
+	"github.com/phillinzzz/newBsc/eth/ethconfig"
+	"github.com/phillinzzz/newBsc/eth/protocols/eth"
+	"github.com/phillinzzz/newBsc/log"
+	"github.com/phillinzzz/newBsc/p2p"
+	"github.com/phillinzzz/newBsc/p2p/dnsdisc"
+	"github.com/phillinzzz/newBsc/p2p/enode"
 	"sync"
 	"time"
 )
@@ -81,7 +81,6 @@ func (l *Client) ethPeerCleanLoop(maxTimeNoComm, loopTime time.Duration) {
 			//移除长时间没有通信的远程节点
 			if time.Since(t) > maxTimeNoComm {
 				l.logger.Info("移除长时间没有通信的节点", "节点ID", peerName[:10])
-
 				l.ethPeers[peerName].Disconnect(p2p.DiscUselessPeer)
 				delete(l.ethPeers, peerName)
 			}
