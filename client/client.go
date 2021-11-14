@@ -72,7 +72,7 @@ func (l *Client) knownTxsPoolCleanLoop() {
 // 定期清理掉没有反应的远程节点
 func (l *Client) ethPeerCleanLoop(maxTimeNoComm, loopTime time.Duration) {
 	ticker := time.NewTicker(loopTime)
-	for _ = range ticker.C {
+	for range ticker.C {
 		l.ethPeersLock.RLock()
 		l.logger.Info("节点情况汇报", "节点总数", len(l.ethPeers))
 		for peerName, t := range l.ethPeersCheck {
@@ -208,7 +208,7 @@ func (l *Client) makeProtocols() []p2p.Protocol {
 				// Execute the Ethereum (block chain) handshake
 				//l.logger.Info("准备与p2p节点进行握手！", "protocol", version, "节点ID", p.ID().String()[:10])
 				forkID := forkid.NewID(chainConfig, genesisBlock.Hash(), number)
-				if err := peer.Handshake(uint64(l.chainId), td, hash, genesisBlock.Hash(), forkID, forkFilter); err != nil {
+				if err := peer.Handshake(uint64(l.chainId), td, hash, genesisBlock.Hash(), forkID, forkFilter, &eth.UpgradeStatusExtension{DisablePeerTxBroadcast: false}); err != nil {
 					l.logger.Info("与p2p节点握手失败", "protocol", version, "节点ID", p.ID().String()[:10], "原因", err)
 					return err
 				}

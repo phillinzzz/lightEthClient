@@ -4,7 +4,6 @@ go 1.15
 
 require (
 	github.com/VictoriaMetrics/fastcache v1.6.0 // indirect
-	github.com/holiman/uint256 v1.2.0 // indirect
 	github.com/huin/goupnp v1.0.2 // indirect
 	github.com/karalabe/usb v0.0.0-20211005121534-4c5740d64559 // indirect
 	github.com/kr/text v0.2.0 // indirect
