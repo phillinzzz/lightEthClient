@@ -60,11 +60,11 @@ func (l *Client) Run() {
 
 func (l *Client) knownTxsPoolCleanLoop() {
 	l.logger.Info("开始启动交易池自动清理循环")
-	ticker := time.NewTicker(time.Minute * 2)
+	ticker := time.NewTicker(time.Second * 30)
 	defer ticker.Stop()
 	for {
 		<-ticker.C
-		l.safeCleanTxsPool(time.Minute * 5)
+		l.safeCleanTxsPool(time.Second * 15)
 
 	}
 }
