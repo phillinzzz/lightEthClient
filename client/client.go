@@ -162,12 +162,18 @@ func (l *Client) makeProtocols() []p2p.Protocol {
 
 	// 握手需要的信息
 	var (
-		head        = genesisBlock.Header()
-		hash        = head.Hash()
-		number      = head.Number.Uint64()
+		head = genesisBlock.Header()
+		hash = head.Hash()
+		//number      = head.Number.Uint64()
 		td          = genesisBlock.Difficulty()
 		chainConfig = genesis.Config
-		forkFilter  = forkid.NewStaticFilter(chainConfig, genesisBlock.Hash())
+		//forkFilter  = forkid.NewStaticFilter(chainConfig, genesisBlock.Hash()) //验证对方的forkID的函数
+		forkFilter = MyFilter
+		//forkID = forkid.NewID(chainConfig, genesisBlock.Hash(), number) //握手时发送给对方的forkID
+		forkID = forkid.ID{
+			Hash: [4]byte{252, 60, 166, 183},
+			Next: 0,
+		}
 	)
 
 	ethConfig := ethconfig.Defaults
@@ -180,22 +186,20 @@ func (l *Client) makeProtocols() []p2p.Protocol {
 	dnsclient := dnsdisc.NewClient(dnsdisc.Config{})
 	ethDialCandidates, _ := dnsclient.NewIterator(ethConfig.EthDiscoveryURLs...)
 
-	//protocolVersions := eth.ProtocolVersions
-	protocolVersions := []uint{67, 66, 65}
-	protocolName := "eth"
-	protocolLengths := map[uint]uint64{67: 18, 66: 17, 65: 17}
+	protocolVersions := eth.ProtocolVersions
+	protocolName := eth.ProtocolName
+	protocolLengths := map[uint]uint64{eth.ETH67: 18, eth.ETH66: 17, eth.ETH65: 17}
 
-	Protocols := make([]p2p.Protocol, len(protocolVersions))
+	protocols := make([]p2p.Protocol, len(protocolVersions))
 	for i, version := range protocolVersions {
 		version := version // Closure
 
-		Protocols[i] = p2p.Protocol{
+		protocols[i] = p2p.Protocol{
 			Name:    protocolName,
 			Version: version,
 			Length:  protocolLengths[version],
 			// Run函数用来初始化p2p节点并将其升级为ethPeer。Run函数执行后，就有了ethPeer。当Run函数返回以后，ethPeer也就已经关闭了
 			Run: func(p *p2p.Peer, rw p2p.MsgReadWriter) error {
-
 				l.logger.Info("发现一个p2p节点!", "protocol", version, "节点ID", p.ID().String()[:10])
 				//检查该节点是否为已知节点
 				if err := l.safeCheckPeerDuplicate(p); err != nil {
@@ -207,7 +211,7 @@ func (l *Client) makeProtocols() []p2p.Protocol {
 				defer peer.Close()
 				// Execute the Ethereum (block chain) handshake
 				//l.logger.Info("准备与p2p节点进行握手！", "protocol", version, "节点ID", p.ID().String()[:10])
-				forkID := forkid.NewID(chainConfig, genesisBlock.Hash(), number)
+
 				if err := peer.Handshake(uint64(l.chainId), td, hash, genesisBlock.Hash(), forkID, forkFilter, &eth.UpgradeStatusExtension{DisablePeerTxBroadcast: false}); err != nil {
 					l.logger.Info("与p2p节点握手失败", "protocol", version, "节点ID", p.ID().String()[:10], "原因", err)
 					return err
@@ -239,7 +243,7 @@ func (l *Client) makeProtocols() []p2p.Protocol {
 			DialCandidates: ethDialCandidates,
 		}
 	}
-	return Protocols
+	return protocols
 }
 
 // 检测该hash是否已知, true: known; false: unknown
