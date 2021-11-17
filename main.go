@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"github.com/phillinzzz/lightEthClient/config/bscConfig"
-	"github.com/phillinzzz/newBsc/core/forkid"
 	"hash/crc32"
 )
 
@@ -27,11 +26,11 @@ func main() {
 	fmt.Println(checkSumHash)
 
 	//forkID := forkid.NewID(genesis.Config, genesisBlock.Hash(), genesisBlock.Header().Number.Uint64())
-	forkID := forkid.NewID(genesis.Config, genesisBlock.Hash(), 1000)
+	//forkID := forkid.NewID(genesis.Config, genesisBlock.Hash(), 1000)
 	//forkID := forkid.ID{
 	//	Hash: [4]byte{252, 60, 166, 183},
 	//	Next: 0,
 	//}
 
-	fmt.Printf("%+v", forkID)
+	//fmt.Printf("%+v", forkID)
 }
