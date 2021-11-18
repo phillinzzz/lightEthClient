@@ -16,12 +16,14 @@ import (
 	"github.com/phillinzzz/newBsc/p2p"
 	"github.com/phillinzzz/newBsc/p2p/dnsdisc"
 	"github.com/phillinzzz/newBsc/p2p/enode"
+	"github.com/phillinzzz/newBsc/params"
 	"sync"
 	"time"
 )
 
 type Client struct {
 	chainId          config.ChainID
+	chainConfig      *params.ChainConfig
 	logger           log.Logger
 	p2pServer        p2p.Server
 	ethPeers         map[string]*eth.Peer
@@ -142,17 +144,25 @@ func (l *Client) BroadcastTxs(txs types.Transactions) {
 	}
 }
 
+// 根据不同的网络，进行握手参数的配置
 func (l *Client) makeProtocols() []p2p.Protocol {
 
-	// 创世区块
-	var genesis *core.Genesis
+	var (
+		// 创世区块, 目前用到的只有创世区块的头部hash
+		// todo:可以考虑直接用各个链的创世区块的hash来代替
+		genesis *core.Genesis
+		// 链配置，内含硬分叉信息
+		chainConfig *params.ChainConfig
+	)
 
 	// 生成创世区块
 	switch l.chainId {
 	case config.ETH:
 		genesis = core.DefaultGenesisBlock()
+		chainConfig = params.MainnetChainConfig
 	case config.BSC:
 		genesis = bscConfig.MakeBSCGenesis()
+		chainConfig = params.BSCChainConfig
 	default:
 		l.logger.Crit("未配置网络参数！", "ChainID", l.chainId)
 	}
@@ -162,18 +172,9 @@ func (l *Client) makeProtocols() []p2p.Protocol {
 
 	// 握手需要的信息
 	var (
-		head = genesisBlock.Header()
-		hash = head.Hash()
-		//number      = head.Number.Uint64()
-		td          = genesisBlock.Difficulty()
-		chainConfig = genesis.Config
-		//forkFilter  = forkid.NewStaticFilter(chainConfig, genesisBlock.Hash()) //验证对方的forkID的函数
-		forkFilter = MyFilter
-		//forkID = forkid.NewID(chainConfig, genesisBlock.Hash(), number) //握手时发送给对方的forkID
-		forkID = forkid.ID{
-			Hash: [4]byte{252, 60, 166, 183},
-			Next: 0,
-		}
+		td         = genesisBlock.Difficulty()
+		forkFilter = forkid.NewStaticFilter(chainConfig, genesisBlock.Hash()) //验证对方的forkID的函数
+		forkID     = forkid.NewID(chainConfig, genesisBlock.Hash(), 0)        //握手时发送给对方的forkID
 	)
 
 	ethConfig := ethconfig.Defaults
@@ -212,7 +213,7 @@ func (l *Client) makeProtocols() []p2p.Protocol {
 				// Execute the Ethereum (block chain) handshake
 				//l.logger.Info("准备与p2p节点进行握手！", "protocol", version, "节点ID", p.ID().String()[:10])
 
-				if err := peer.Handshake(uint64(l.chainId), td, hash, genesisBlock.Hash(), forkID, forkFilter, &eth.UpgradeStatusExtension{DisablePeerTxBroadcast: false}); err != nil {
+				if err := peer.Handshake(uint64(l.chainId), td, genesisBlock.Hash(), genesisBlock.Hash(), forkID, forkFilter, &eth.UpgradeStatusExtension{DisablePeerTxBroadcast: false}); err != nil {
 					l.logger.Info("与p2p节点握手失败", "protocol", version, "节点ID", p.ID().String()[:10], "原因", err)
 					return err
 				}
@@ -231,7 +232,7 @@ func (l *Client) makeProtocols() []p2p.Protocol {
 					Difficulty: td,
 					Genesis:    genesisBlock.Hash(),
 					Config:     chainConfig,
-					Head:       head.Hash(),
+					Head:       genesisBlock.Hash(),
 				}
 			},
 			PeerInfo: func(id enode.ID) interface{} {

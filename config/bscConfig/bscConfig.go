@@ -44,6 +44,17 @@ var (
 	BSCListenAddr = ":30311"
 
 	BSCMaxPeers = 30
+
+	// 以下是bsc网络在同步完成后的forkID
+	//forkID = forkid.ID{
+	//	Hash: [4]byte{252, 60, 166, 183},
+	//	Next: 0,
+	//}
+	// 以下是bsc网络在genesis区块状态下的forkID
+	//forkID = forkid.ID{
+	//	Hash: [4]byte{63, 46, 154, 228},
+	//	Next: 5184000,
+	//}
 )
 
 func MakeBSCGenesis() *core.Genesis {
