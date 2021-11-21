@@ -3,7 +3,6 @@ package client
 import (
 	"fmt"
 	"github.com/phillinzzz/lightEthClient/config"
-	"github.com/phillinzzz/lightEthClient/config/bscConfig"
 	"github.com/phillinzzz/lightEthClient/log"
 	"github.com/phillinzzz/newBsc/cmd/utils"
 	"github.com/phillinzzz/newBsc/common"
@@ -17,6 +16,7 @@ import (
 	"github.com/phillinzzz/newBsc/p2p/dnsdisc"
 	"github.com/phillinzzz/newBsc/p2p/enode"
 	"github.com/phillinzzz/newBsc/params"
+	"math/big"
 	"sync"
 	"time"
 )
@@ -198,39 +198,45 @@ func (l *Client) safeCleanTxsPool(maxDuration time.Duration) {
 func (l *Client) makeProtocols() []p2p.Protocol {
 
 	var (
-		// 创世区块, 目前用到的只有创世区块的头部hash
-		// todo:可以考虑直接用各个链的创世区块的hash来代替
-		genesis *core.Genesis
+		//genesis *core.Genesis
+		// 创世区块的hash
+		genesisHash common.Hash
 		// 链配置，内含硬分叉信息
 		chainConfig *params.ChainConfig
+
+		// 当前总难度（创世区块难度）
+		td *big.Int
 	)
 
 	// 生成创世区块
 	switch l.chainId {
 	case config.ETH:
-		genesis = core.DefaultGenesisBlock()
+		//genesis = core.DefaultGenesisBlock()
+		td = core.DefaultGenesisBlock().Difficulty
+		genesisHash = params.MainnetGenesisHash
 		chainConfig = params.MainnetChainConfig
 	case config.BSC:
-		genesis = bscConfig.MakeBSCGenesis()
+		//genesis = bscConfig.MakeBSCGenesis()
+		td = big.NewInt(1)
+		genesisHash = params.BSCGenesisHash
 		chainConfig = params.BSCChainConfig
 	default:
 		l.logger.Crit("未配置网络参数！", "ChainID", l.chainId)
 	}
 
 	//genesisHash := common.HexToHash("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
-	genesisBlock := genesis.ToBlock(nil)
+	//genesisBlock := genesis.ToBlock(nil)
 
 	// 握手需要的信息
 	var (
-		td         = genesisBlock.Difficulty()
-		forkFilter = forkid.NewStaticFilter(chainConfig, genesisBlock.Hash()) //验证对方的forkID的函数
-		forkID     = forkid.NewID(chainConfig, genesisBlock.Hash(), 0)        //握手时发送给对方的forkID
+		forkFilter = forkid.NewStaticFilter(chainConfig, genesisHash) //验证对方的forkID的函数
+		forkID     = forkid.NewID(chainConfig, genesisHash, 0)        //握手时发送给对方的forkID
 	)
 
 	ethConfig := ethconfig.Defaults
 	//eth主网有DNS节点列表功能，bsc网络没有此功能
 	if l.chainId == config.ETH {
-		utils.SetDNSDiscoveryDefaults(&ethConfig, genesisBlock.Hash())
+		utils.SetDNSDiscoveryDefaults(&ethConfig, genesisHash)
 	}
 
 	// Setup DNS discovery iterators. 只对ETH主网起效果。
@@ -263,7 +269,7 @@ func (l *Client) makeProtocols() []p2p.Protocol {
 				// Execute the Ethereum (block chain) handshake
 				//l.logger.Info("准备与p2p节点进行握手！", "protocol", version, "节点ID", p.ID().String()[:10])
 
-				if err := peer.Handshake(uint64(l.chainId), td, genesisBlock.Hash(), genesisBlock.Hash(), forkID, forkFilter, &eth.UpgradeStatusExtension{DisablePeerTxBroadcast: false}); err != nil {
+				if err := peer.Handshake(uint64(l.chainId), td, genesisHash, genesisHash, forkID, forkFilter, &eth.UpgradeStatusExtension{DisablePeerTxBroadcast: false}); err != nil {
 					l.logger.Info("与p2p节点握手失败", "protocol", version, "节点ID", p.ID().String()[:10], "原因", err)
 					return err
 				}
@@ -280,9 +286,9 @@ func (l *Client) makeProtocols() []p2p.Protocol {
 				return &eth.NodeInfo{
 					Network:    uint64(l.chainId),
 					Difficulty: td,
-					Genesis:    genesisBlock.Hash(),
+					Genesis:    genesisHash,
 					Config:     chainConfig,
-					Head:       genesisBlock.Hash(),
+					Head:       genesisHash,
 				}
 			},
 			PeerInfo: func(id enode.ID) interface{} {
