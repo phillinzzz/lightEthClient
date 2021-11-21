@@ -21,60 +21,117 @@ import (
 	"time"
 )
 
+// 客户端的几种工作模式
+
+const (
+	Debug = iota
+	Produce
+)
+
 type Client struct {
-	chainId          config.ChainID
-	chainConfig      *params.ChainConfig
-	logger           log.Logger
-	p2pServer        p2p.Server
-	ethPeers         map[string]*eth.Peer
-	ethPeersCheck    map[string]time.Time
-	ethPeersLock     sync.RWMutex
+	mode          int
+	chainId       config.ChainID
+	chainConfig   *params.ChainConfig
+	logger        log.Logger
+	p2pServer     p2p.Server
+	ethPeers      map[string]*eth.Peer
+	ethPeersCheck map[string]time.Time
+	ethPeersLock  sync.RWMutex
+
 	knownTxsPool     map[common.Hash]time.Time
 	knownTxsPoolLock sync.RWMutex
+
+	// 对外服务
+	newTxListenChan chan *types.Transaction //发现的新的交易由client发送到这个通道里,供外部监听
+	broadcastTxChan chan *types.Transaction //需要广播的交易由外部发送到这个通道里，交由client进行广播
 }
 
-func (l *Client) Init(chainId config.ChainID) *Client {
+func (l *Client) Init(chainId config.ChainID, mode int) *Client {
 	l.chainId = chainId
 	l.knownTxsPool = make(map[common.Hash]time.Time)
-	l.logger = log2.MyLogger.New("模块", "ETH")
-
-	p2pCfg, _ := config.GetP2PConfig(chainId)
-	l.p2pServer = p2p.Server{Config: p2pCfg}
-
 	l.ethPeers = make(map[string]*eth.Peer)
 	l.ethPeersCheck = make(map[string]time.Time)
+	l.newTxListenChan = make(chan *types.Transaction, 1000)
+	l.broadcastTxChan = make(chan *types.Transaction, 5)
+
+	// 配置logger
+	if mode == Produce {
+		log2.MyLogger.SetHandler(log.DiscardHandler())
+	}
+	l.logger = log2.MyLogger.New("模块", "ETH")
+
+	// 配置p2pServer模块
+	p2pLogger := log2.MyLogger.New("模块", "p2p")
+
+	p2pCfg, _ := config.GetP2PConfig(chainId, p2pLogger)
+	l.p2pServer = p2p.Server{Config: p2pCfg}
 
 	protos := l.makeProtocols()
 	l.p2pServer.Protocols = protos
 
+	l.run()
+
 	return l
 }
 
-func (l *Client) Run() {
+// Run 启动客户端
+func (l *Client) run() {
 	if err := l.p2pServer.Start(); err != nil {
 		l.logger.Crit("Failed to start p2p server", "err", err)
 		return
 	}
-	go l.knownTxsPoolCleanLoop()
+	go l.knownTxsPoolCleanLoop(time.Second*15, time.Second*3)
 	go l.ethPeerCleanLoop(time.Minute*2, time.Minute*2)
-
+	go l.broadcastTxsLoop()
 }
 
-func (l *Client) knownTxsPoolCleanLoop() {
+// GetNewTxListenChan 外部订阅监听网络上新的交易的通道，只能订阅一次
+func (l *Client) GetNewTxListenChan() <-chan *types.Transaction {
+	return l.newTxListenChan
+}
+
+func (l *Client) GetBroadcastTxChan() chan<- *types.Transaction {
+	return l.broadcastTxChan
+}
+
+// todo:需要改写
+func (l *Client) broadcastTxsLoop() {
+	for tx := range l.broadcastTxChan {
+		txs := []*types.Transaction{tx}
+		l.ethPeersLock.RLock()
+		l.logger.Info("向远程节点广播了一笔交易！", "交易hash", tx.Hash())
+		for _, ethPeer := range l.ethPeers {
+			// todo：需要重新改造ethPeer "type myEthPeer eth.Peer"
+			// 向某个节点发送交易，超时则断开和这个节点的连接
+			newPeer := ethPeer
+			go func() {
+				if err := newPeer.SendTransactions(txs); err != nil {
+					l.logger.Warn("向远程节点广播交易超时！", "节点ID", ethPeer.ID()[:10], "原因", err)
+					newPeer.Disconnect(p2p.DiscUselessPeer)
+				}
+			}()
+			//p2p.Send(p.rw, TransactionsMsg, txs)
+		}
+		l.ethPeersLock.RUnlock()
+	}
+}
+
+// 定期清理已知的交易，防止重复向远程节点获取已知的交易
+func (l *Client) knownTxsPoolCleanLoop(loopTime, maxDuration time.Duration) {
 	l.logger.Info("开始启动交易池自动清理循环")
-	ticker := time.NewTicker(time.Second * 30)
+	ticker := time.NewTicker(loopTime)
 	defer ticker.Stop()
 	for {
 		<-ticker.C
-		l.safeCleanTxsPool(time.Second * 15)
+		l.safeCleanTxsPool(maxDuration)
 
 	}
 }
 
 // 定期清理掉没有反应的远程节点
 func (l *Client) ethPeerCleanLoop(maxTimeNoComm, loopTime time.Duration) {
-	ticker := time.NewTicker(loopTime)
-	for range ticker.C {
+
+	for range time.Tick(loopTime) {
 		l.ethPeersLock.RLock()
 		l.logger.Info("节点情况汇报", "节点总数", len(l.ethPeers))
 		for peerName, t := range l.ethPeersCheck {
@@ -84,7 +141,7 @@ func (l *Client) ethPeerCleanLoop(maxTimeNoComm, loopTime time.Duration) {
 			if time.Since(t) > maxTimeNoComm {
 				l.logger.Info("移除长时间没有通信的节点", "节点ID", peerName[:10])
 				l.ethPeers[peerName].Disconnect(p2p.DiscUselessPeer)
-				delete(l.ethPeers, peerName)
+				// 与远程节点断开连接后，protocol里面的Run函数出错返回，将会调用safeUnregisterEthPeer进行清理工作
 			}
 		}
 
@@ -135,13 +192,6 @@ func (l *Client) safeCleanTxsPool(maxDuration time.Duration) {
 		}
 	}
 	l.logger.Info("池子内的过期交易清理完成", "池子内交易数量", len(l.knownTxsPool))
-}
-
-func (l *Client) BroadcastTxs(txs types.Transactions) {
-	for _, ethPeer := range l.ethPeers {
-		// todo：需要重新改造ethPeer "type myEthPeer eth.Peer"
-		_ = ethPeer.SendTransactions(txs)
-	}
 }
 
 // 根据不同的网络，进行握手参数的配置
@@ -268,24 +318,35 @@ func (l *Client) safeCountTx() int {
 	return len(l.knownTxsPool)
 }
 
+// 将接收到的新的tx发送到监听通道里面，通知外部程序
 func (l *Client) handleNewTxs(peer *eth.Peer, txs types.Transactions, requestID uint64) {
 
 	var txsUnknown []common.Hash
-	//fmt.Printf("Peer:%v debug:发送来%v个tx，其中%v个为新的tx!\n", peer.ID(), txs.Len(), len(txsUnknown))
+
 	for _, tx := range txs {
+		// 忽略重复的交易
 		if l.safeHasTx(tx.Hash()) {
-			//l.logger.Info("收到了重复交易！", "节点ID", peer.ID())
 			continue
 		}
+		// 对外通知发现了新交易
+		select {
+		case l.newTxListenChan <- tx:
+		default:
+			l.logger.Warn("外部程序未能及时读取新的Tx信息！")
+		}
+
+		// 内部管理新的交易，防止重复获取
 		txsUnknown = append(txsUnknown, tx.Hash())
 		l.safeAddTx(tx.Hash())
 	}
-	if requestID != 0 {
-		l.logger.Debug("远程节点返回了请求的交易！", "节点ID", peer.ID()[:10], "请求ID", requestID, "新交易数量", len(txsUnknown), "总数量", txs.Len())
-	} else {
-		l.logger.Debug("远程节点广播来一批交易！", "节点ID", peer.ID()[:10], "新交易数量", len(txsUnknown), "总数量", txs.Len())
-	}
 
+	if l.mode == Debug {
+		if requestID != 0 {
+			l.logger.Debug("远程节点返回了请求的交易！", "节点ID", peer.ID()[:10], "请求ID", requestID, "新交易数量", len(txsUnknown), "总数量", txs.Len())
+		} else {
+			l.logger.Debug("远程节点广播来一批交易！", "节点ID", peer.ID()[:10], "新交易数量", len(txsUnknown), "总数量", txs.Len())
+		}
+	}
 }
 
 func (l *Client) handleNewAnns(peer *eth.Peer, anns []common.Hash) error {

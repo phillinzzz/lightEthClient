@@ -11,7 +11,7 @@ var MyLogger log.Logger
 func init() {
 	MyLogger = log.New()
 	handler := log.StreamHandler(os.Stdout, log.LogfmtFormat())
-	handler2 := log.MatchFilterHandler("模块", "ETH", handler)
-	handler3 := log.LvlFilterHandler(log.LvlInfo, handler2)
+	//handler2 := log.MatchFilterHandler("模块", "ETH", handler)
+	handler3 := log.LvlFilterHandler(log.LvlInfo, handler)
 	MyLogger.SetHandler(handler3)
 }
