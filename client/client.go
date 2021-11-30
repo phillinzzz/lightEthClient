@@ -22,15 +22,24 @@ import (
 )
 
 // 客户端的几种工作模式
+type Mode int
 
 const (
-	Debug = iota
-	Produce
+	ModeDebug = iota
+	ModeProduce
+)
+
+type ChainID uint64
+
+const (
+	ETHChainID  ChainID = 1
+	BSCChainID  ChainID = 56
+	HECOChainID ChainID = 99
 )
 
 type Client struct {
-	mode          int
-	chainId       config.ChainID
+	mode          Mode
+	chainId       ChainID
 	chainConfig   *params.ChainConfig
 	logger        log.Logger
 	p2pServer     p2p.Server
@@ -46,8 +55,9 @@ type Client struct {
 	broadcastTxChan chan *types.Transaction //需要广播的交易由外部发送到这个通道里，交由client进行广播
 }
 
-func NewClient(chainId config.ChainID, mode int) *Client {
+func NewClient(chainId ChainID, mode Mode) *Client {
 	newClient := &Client{
+		mode:    mode,
 		chainId: chainId,
 	}
 
@@ -58,7 +68,7 @@ func NewClient(chainId config.ChainID, mode int) *Client {
 	newClient.broadcastTxChan = make(chan *types.Transaction, 5)
 
 	// 配置logger
-	if mode == Produce {
+	if mode != ModeDebug {
 		log2.MyLogger.SetHandler(log.DiscardHandler())
 	}
 	newClient.logger = log2.MyLogger.New("模块", "ETH")
@@ -213,12 +223,12 @@ func (l *Client) makeProtocols() []p2p.Protocol {
 
 	// 生成创世区块
 	switch l.chainId {
-	case config.ETH:
+	case ETHChainID:
 		//genesis = core.DefaultGenesisBlock()
 		td = core.DefaultGenesisBlock().Difficulty
 		genesisHash = params.MainnetGenesisHash
 		chainConfig = params.MainnetChainConfig
-	case config.BSC:
+	case BSCChainID:
 		//genesis = bscConfig.MakeBSCGenesis()
 		td = big.NewInt(1)
 		genesisHash = params.BSCGenesisHash
@@ -238,7 +248,7 @@ func (l *Client) makeProtocols() []p2p.Protocol {
 
 	ethConfig := ethconfig.Defaults
 	//eth主网有DNS节点列表功能，bsc网络没有此功能
-	if l.chainId == config.ETH {
+	if l.chainId == ETHChainID {
 		utils.SetDNSDiscoveryDefaults(&ethConfig, genesisHash)
 	}
 
@@ -349,7 +359,7 @@ func (l *Client) handleNewTxs(peer *eth.Peer, txs types.Transactions, requestID 
 		l.safeAddTx(tx.Hash())
 	}
 
-	if l.mode == Debug {
+	if l.mode == ModeDebug {
 		if requestID != 0 {
 			l.logger.Debug("远程节点返回了请求的交易！", "节点ID", peer.ID()[:10], "请求ID", requestID, "新交易数量", len(txsUnknown), "总数量", txs.Len())
 		} else {

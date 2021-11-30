@@ -2,12 +2,11 @@ package main
 
 import (
 	"github.com/phillinzzz/lightEthClient/client"
-	"github.com/phillinzzz/lightEthClient/config"
 	log2 "github.com/phillinzzz/lightEthClient/log"
 )
 
 func main() {
-	lightClient := client.NewClient(config.BSC, client.Debug)
+	lightClient := client.NewClient(client.BSCChainID, client.ModeDebug)
 	listenChan := lightClient.GetNewTxListenChan()
 	broadChan := lightClient.GetBroadcastTxChan()
 
