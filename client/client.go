@@ -46,32 +46,35 @@ type Client struct {
 	broadcastTxChan chan *types.Transaction //需要广播的交易由外部发送到这个通道里，交由client进行广播
 }
 
-func (l *Client) Init(chainId config.ChainID, mode int) *Client {
-	l.chainId = chainId
-	l.knownTxsPool = make(map[common.Hash]time.Time)
-	l.ethPeers = make(map[string]*eth.Peer)
-	l.ethPeersCheck = make(map[string]time.Time)
-	l.newTxListenChan = make(chan *types.Transaction, 1000)
-	l.broadcastTxChan = make(chan *types.Transaction, 5)
+func NewClient(chainId config.ChainID, mode int) *Client {
+	newClient := &Client{
+		chainId: chainId,
+	}
+
+	newClient.knownTxsPool = make(map[common.Hash]time.Time)
+	newClient.ethPeers = make(map[string]*eth.Peer)
+	newClient.ethPeersCheck = make(map[string]time.Time)
+	newClient.newTxListenChan = make(chan *types.Transaction, 1000)
+	newClient.broadcastTxChan = make(chan *types.Transaction, 5)
 
 	// 配置logger
 	if mode == Produce {
 		log2.MyLogger.SetHandler(log.DiscardHandler())
 	}
-	l.logger = log2.MyLogger.New("模块", "ETH")
+	newClient.logger = log2.MyLogger.New("模块", "ETH")
 
 	// 配置p2pServer模块
 	p2pLogger := log2.MyLogger.New("模块", "p2p")
 
 	p2pCfg, _ := config.GetP2PConfig(chainId, p2pLogger)
-	l.p2pServer = p2p.Server{Config: p2pCfg}
+	newClient.p2pServer = p2p.Server{Config: p2pCfg}
 
-	protos := l.makeProtocols()
-	l.p2pServer.Protocols = protos
+	protos := newClient.makeProtocols()
+	newClient.p2pServer.Protocols = protos
 
-	l.run()
+	newClient.run()
 
-	return l
+	return newClient
 }
 
 // Run 启动客户端

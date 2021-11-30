@@ -7,7 +7,7 @@ import (
 )
 
 func main() {
-	lightClient := new(client.Client).Init(config.BSC, client.Debug)
+	lightClient := client.NewClient(config.BSC, client.Debug)
 	listenChan := lightClient.GetNewTxListenChan()
 	broadChan := lightClient.GetBroadcastTxChan()
 
