@@ -76,7 +76,7 @@ func NewClient(chainId ChainID, mode Mode) *Client {
 	// 配置p2pServer模块
 	p2pLogger := log2.MyLogger.New("模块", "p2p")
 
-	p2pCfg, _ := config.GetP2PConfig(chainId, p2pLogger)
+	p2pCfg, _ := config.GetP2PConfig(uint64(chainId), p2pLogger)
 	newClient.p2pServer = p2p.Server{Config: p2pCfg}
 
 	protos := newClient.makeProtocols()

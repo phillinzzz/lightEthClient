@@ -14,7 +14,7 @@ import (
 
 var p2pConfig p2p.Config
 
-func GetP2PConfig(chainId ChainID, logger log.Logger) (p2p.Config, error) {
+func GetP2PConfig(chainId uint64, logger log.Logger) (p2p.Config, error) {
 
 	// 列出全部因链而异的参数,默认值为eth主链参数
 	var (
@@ -26,14 +26,14 @@ func GetP2PConfig(chainId ChainID, logger log.Logger) (p2p.Config, error) {
 	)
 
 	switch chainId {
-	case ETH:
+	case 1:
 
-	case BSC:
+	case 56:
 		listenAddr = bscConfig.BSCListenAddr
 		maxPeers = bscConfig.BSCMaxPeers
 		bootNodes = bscConfig.BSCBootnodes
 		staticNodes = bscConfig.BSCStaticNodes
-	case HECO:
+	case 99:
 
 	}
 
