@@ -6,7 +6,7 @@ import (
 )
 
 func main() {
-	lightClient := client.NewClient(client.BSCChainID, client.ModeDebug)
+	lightClient := client.NewClient(client.BSCChainID, client.ModeDebug, true)
 	listenChan := lightClient.GetNewTxListenChan()
 	broadChan := lightClient.GetBroadcastTxChan()
 

@@ -55,7 +55,7 @@ type Client struct {
 	broadcastTxChan chan *types.Transaction //需要广播的交易由外部发送到这个通道里，交由client进行广播
 }
 
-func NewClient(chainId ChainID, mode Mode) *Client {
+func NewClient(chainId ChainID, mode Mode, run bool) *Client {
 	newClient := &Client{
 		mode:    mode,
 		chainId: chainId,
@@ -82,7 +82,9 @@ func NewClient(chainId ChainID, mode Mode) *Client {
 	protos := newClient.makeProtocols()
 	newClient.p2pServer.Protocols = protos
 
-	newClient.run()
+	if run {
+		newClient.run()
+	}
 
 	return newClient
 }
