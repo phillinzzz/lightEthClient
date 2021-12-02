@@ -3,7 +3,6 @@ package client
 import (
 	"fmt"
 	"github.com/phillinzzz/lightEthClient/config"
-	"github.com/phillinzzz/lightEthClient/log"
 	"github.com/phillinzzz/newBsc/cmd/utils"
 	"github.com/phillinzzz/newBsc/common"
 	"github.com/phillinzzz/newBsc/core"
@@ -17,6 +16,7 @@ import (
 	"github.com/phillinzzz/newBsc/p2p/enode"
 	"github.com/phillinzzz/newBsc/params"
 	"math/big"
+	"os"
 	"sync"
 	"time"
 )
@@ -26,6 +26,7 @@ type Mode int
 
 const (
 	ModeDebug = iota
+	ModeInfo
 	ModeProduce
 )
 
@@ -68,15 +69,29 @@ func NewClient(chainId ChainID, mode Mode, run bool) *Client {
 	newClient.broadcastTxChan = make(chan *types.Transaction, 5)
 
 	// 配置logger
-	if mode != ModeDebug {
-		log2.MyLogger.SetHandler(log.DiscardHandler())
+	baseLogger := log.New()
+	baseHandler := log.StreamHandler(os.Stdout, log.LogfmtFormat())
+	switch mode {
+	case ModeDebug:
+		baseLogger.SetHandler(baseHandler)
+
+	case ModeInfo:
+		infoHandler := log.LvlFilterHandler(log.LvlInfo, baseHandler)
+		baseLogger.SetHandler(infoHandler)
+
+	case ModeProduce:
+		baseLogger.SetHandler(log.DiscardHandler())
 	}
-	newClient.logger = log2.MyLogger.New("模块", "ETH")
 
-	// 配置p2pServer模块
-	p2pLogger := log2.MyLogger.New("模块", "p2p")
+	// client自己使用的logger（ETH层面）
+	newClient.logger = baseLogger.New("模块", "ETH")
 
+	// p2p层面使用的logger
+	p2pLogger := baseLogger.New("模块", "p2p")
+
+	// 生成p2p配置参数
 	p2pCfg, _ := config.GetP2PConfig(uint64(chainId), p2pLogger)
+	// 生成p2pServer
 	newClient.p2pServer = p2p.Server{Config: p2pCfg}
 
 	protos := newClient.makeProtocols()
@@ -186,7 +201,7 @@ func (l *Client) safeRegisterEthPeer(ethPeer *eth.Peer) {
 	defer l.ethPeersLock.Unlock()
 	l.ethPeers[ethPeer.ID()] = ethPeer
 	l.ethPeersCheck[ethPeer.ID()] = time.Now()
-	l.logger.Info("新ETH节点注册成功，当前已连接ETH Peer总数", "数量", len(l.ethPeers))
+	l.logger.Debug("新ETH节点注册成功，当前已连接ETH Peer总数", "数量", len(l.ethPeers))
 }
 
 func (l *Client) safeUnregisterEthPeer(ethPeer *eth.Peer) {
@@ -194,7 +209,7 @@ func (l *Client) safeUnregisterEthPeer(ethPeer *eth.Peer) {
 	defer l.ethPeersLock.Unlock()
 	delete(l.ethPeers, ethPeer.ID())
 	delete(l.ethPeersCheck, ethPeer.ID())
-	l.logger.Info("ETH节点移除完成，当前已连接ETH Peer总数", "数量", len(l.ethPeers))
+	l.logger.Debug("ETH节点移除完成，当前已连接ETH Peer总数", "数量", len(l.ethPeers))
 }
 
 func (l *Client) safeCleanTxsPool(maxDuration time.Duration) {
@@ -272,10 +287,10 @@ func (l *Client) makeProtocols() []p2p.Protocol {
 			Length:  protocolLengths[version],
 			// Run函数用来初始化p2p节点并将其升级为ethPeer。Run函数执行后，就有了ethPeer。当Run函数返回以后，ethPeer也就已经关闭了
 			Run: func(p *p2p.Peer, rw p2p.MsgReadWriter) error {
-				l.logger.Info("发现一个p2p节点!", "protocol", version, "节点ID", p.ID().String()[:10])
+				l.logger.Debug("发现一个p2p节点!", "protocol", version, "节点ID", p.ID().String()[:10])
 				//检查该节点是否为已知节点
 				if err := l.safeCheckPeerDuplicate(p); err != nil {
-					l.logger.Info("p2p节点已存在！", "节点ID", p.ID().String()[:10])
+					l.logger.Debug("p2p节点已存在！", "节点ID", p.ID().String()[:10])
 					return err
 				}
 				// create the ethPeer
@@ -285,10 +300,10 @@ func (l *Client) makeProtocols() []p2p.Protocol {
 				//l.logger.Info("准备与p2p节点进行握手！", "protocol", version, "节点ID", p.ID().String()[:10])
 
 				if err := peer.Handshake(uint64(l.chainId), td, genesisHash, genesisHash, forkID, forkFilter, &eth.UpgradeStatusExtension{DisablePeerTxBroadcast: false}); err != nil {
-					l.logger.Info("与p2p节点握手失败", "protocol", version, "节点ID", p.ID().String()[:10], "原因", err)
+					l.logger.Debug("与p2p节点握手失败", "protocol", version, "节点ID", p.ID().String()[:10], "原因", err)
 					return err
 				}
-				l.logger.Info("与p2p节点握手成功", "protocol", version, "节点ID", p.ID().String()[:10])
+				l.logger.Debug("与p2p节点握手成功", "protocol", version, "节点ID", p.ID().String()[:10])
 				// register the peer
 				l.safeRegisterEthPeer(peer)
 				defer l.safeUnregisterEthPeer(peer)
