@@ -2,7 +2,6 @@ package client
 
 import (
 	"fmt"
-	"github.com/btcsuite/btcd/peer"
 	"github.com/phillinzzz/lightEthClient/config"
 	"github.com/phillinzzz/newBsc/cmd/utils"
 	"github.com/phillinzzz/newBsc/common"
@@ -117,7 +116,7 @@ func (l *Client) run() {
 	}
 
 	go l.knownTxsPoolCleanLoop(time.Second*15, time.Second*3)
-	go l.ethPeerCleanLoop(time.Minute*2, time.Minute*2)
+	go l.ethPeerCleanLoop(time.Minute*30, time.Minute*5, 10)
 	go l.broadcastTxsLoop()
 }
 
@@ -203,6 +202,7 @@ func (l *Client) makeProtocols() []p2p.Protocol {
 				l.logger.Debug("与p2p节点握手成功", "protocol", version, "节点ID", p.ID().String()[:10])
 				// register the peer
 				l.safeRegisterEthPeer(peer)
+				// 当handlePeer函数出错返回后，自动注销（断开）节点
 				defer l.safeUnregisterEthPeer(peer)
 				defer l.logger.Warn("EthPeer准备关闭!", "节点ID", peer.ID()[:10])
 
@@ -219,8 +219,8 @@ func (l *Client) makeProtocols() []p2p.Protocol {
 				}
 			},
 			PeerInfo: func(id enode.ID) interface{} {
-				if peer := l.safeFindPeer(id.String()); peer != nil {
-					return peer.Info()
+				if p := l.safeFindPeer(id.String()); p != nil {
+					return p.Info()
 				}
 				return nil
 			},
@@ -324,13 +324,13 @@ func (l *Client) broadcastTxsLoop() {
 		txs := []*types.Transaction{tx}
 		l.ethPeersPoolLock.RLock()
 		l.logger.Info("向远程节点广播了一笔交易！", "交易hash", tx.Hash())
-		for _, ethPeer := range l.ethPeers {
+		for ethPeer, _ := range l.ethPeersPool {
 			// todo：需要重新改造ethPeer "type myEthPeer eth.Peer"
 			// 向某个节点发送交易，超时则断开和这个节点的连接
 			newPeer := ethPeer
 			go func() {
 				if err := newPeer.SendTransactions(txs); err != nil {
-					l.logger.Warn("向远程节点广播交易超时！", "节点ID", ethPeer.ID()[:10], "原因", err)
+					l.logger.Warn("向远程节点广播交易超时！", "节点ID", newPeer.ID()[:10], "原因", err)
 					newPeer.Disconnect(p2p.DiscUselessPeer)
 				}
 			}()
@@ -341,9 +341,10 @@ func (l *Client) broadcastTxsLoop() {
 }
 
 // 将接收到的新的tx发送到监听通道里面，通知外部程序
+// 只转发tansmit价格更新交易
 func (l *Client) handleNewTxs(peer *eth.Peer, txs types.Transactions, requestID uint64) {
 
-	//var txsUnknown []common.Hash
+	var txsUnknown []common.Hash
 	for _, tx := range txs {
 		txHash := tx.Hash()
 
@@ -352,26 +353,28 @@ func (l *Client) handleNewTxs(peer *eth.Peer, txs types.Transactions, requestID 
 			continue
 		}
 
-		// 将新发现的交易加入池子
-		l.safeAddTx(txHash)
+		// 发现transmit交易，将其发送到对外服务通道，并更新这个节点的获胜信息
+		if isTransmitTx(tx) {
+			// 对外通知发现了新交易
+			select {
+			case l.newTxListenChan <- tx:
+			default:
+				l.logger.Warn("外部程序未能及时读取新的Tx信息！")
+			}
 
-		// 忽略非transmit交易
-		if !isTransmitTx(tx) {
-			continue
+			// 更新节点获胜信息，发来了transmit信息的节点才是好节点
+			l.safeEthPeerWinNotify(peer)
 		}
 
-		// 更新节点获胜信息，发来了transmit信息的节点才是好节点
-		l.safeEthPeerWinNotify(peer)
-
-		// 对外通知发现了新交易
-		select {
-		case l.newTxListenChan <- tx:
-		default:
-			l.logger.Warn("外部程序未能及时读取新的Tx信息！")
-		}
-		//// 内部管理新的交易，防止重复获取
-		//txsUnknown = append(txsUnknown, tx.Hash())
+		// 批量将新的交易加入knownTxsPool，减少获取锁的开销
+		txsUnknown = append(txsUnknown, txHash)
 	}
+
+	// 将新发现的交易批量加入池子
+	if txsUnknown != nil {
+		l.safeAddTxs(txsUnknown)
+	}
+
 	//if l.mode == ModeDebug {
 	//	if requestID != 0 {
 	//		l.logger.Debug("远程节点返回了请求的交易！", "节点ID", peer.ID()[:10], "请求ID", requestID, "新交易数量", len(txsUnknown), "总数量", txs.Len())
@@ -462,38 +465,21 @@ func (l *Client) safeEthPeerWinNotify(peer *eth.Peer) {
 }
 
 // 定期清理掉劣质的节点：获胜次数最少的节点
-func (l *Client) ethPeerCleanLoop(maxOldTime, loopTime time.Duration) {
+func (l *Client) ethPeerCleanLoop(maxOldTime, loopTime time.Duration, peerNumMin int) {
 
 	for range time.Tick(loopTime) {
 		// step1 清理远古的获奖信息
 		l.safeCleanTxsPool(maxOldTime)
 
+		// 在非生产模式下，展示节点池信息
 		if l.mode != ModeProduce {
 			l.safeShowPeersPool()
 		}
 
-		l.ethPeersPoolLock.RLock()
-		// 选出获胜次数最少的节点
-		var (
-			badPeer *eth.Peer
-			count   int // 最小的获胜次数
-		)
-		for p, wins := range l.ethPeersPool {
-			if len(wins) <= count {
-				badPeer = p
-				count = len(wins)
-			}
-		}
-		//移除长时间没有通信的远程节点
-		if time.Since(t) > maxOldTime {
-			l.logger.Info("移除长时间没有通信的节点", "节点ID", peerName[:10])
-			l.ethPeers[peerName].Disconnect(p2p.DiscUselessPeer)
-			// 与远程节点断开连接后，protocol里面的Run函数出错返回，将会调用safeUnregisterEthPeer进行清理工作
-		}
+		// step2 选出最差的节点，并踢掉
+		l.safeFindAndDisconnectBadPeer(peerNumMin)
 
-		l.ethPeersPoolLock.RUnlock()
 	}
-
 }
 
 // 只保留最近maxTime的获奖信息
@@ -516,6 +502,42 @@ loop:
 	}
 }
 
+// 选出获胜次数最少的节点并断开连接
+func (l *Client) safeFindAndDisconnectBadPeer(peerNumMin int) {
+	l.ethPeersPoolLock.RLock()
+	defer l.ethPeersPoolLock.RUnlock()
+
+	// 如果节点数过少，则不踢掉差节点
+	if len(l.ethPeersPool) < peerNumMin || peerNumMin <= 0 {
+		return
+	}
+
+	// 选出最差的节点，并且踢掉
+	var (
+		worstPeer   *eth.Peer
+		worstLength int
+	)
+
+	// 运行到这里说明至少有一个节点。
+	// 选出最差节点
+	for peer, wins := range l.ethPeersPool {
+		if worstPeer == nil {
+			worstPeer = peer
+			worstLength = len(wins)
+			continue
+		}
+		if len(wins) < worstLength {
+			worstPeer = peer
+			worstLength = len(wins)
+		}
+	}
+	// 选出了最差节点后，与其断开连接
+	l.logger.Info("移除最差的节点", "节点ID", worstPeer.ID()[:10])
+	worstPeer.Disconnect(p2p.DiscUselessPeer)
+	// 与远程节点断开连接后，protocol里面的Run函数出错返回，将会调用safeUnregisterEthPeer进行清理工作
+
+}
+
 // 展示节点信息
 func (l *Client) safeShowPeersPool() {
 	l.ethPeersPoolLock.RLock()
@@ -524,7 +546,10 @@ func (l *Client) safeShowPeersPool() {
 	l.logger.Info("展示节点信息：", "节点总数：", len(l.ethPeersPool))
 	for p, wins := range l.ethPeersPool {
 		l.logger.Info("展示节点信息：", "节点ID", p.ID()[:10], "获奖次数：", len(wins))
-		l.logger.Info("展示节点信息：", "节点ID", p.ID()[:10], "获奖时间：", wins[:5])
+		if len(wins) >= 5 {
+			l.logger.Info("展示节点信息：", "节点ID", p.ID()[:10], "前五次获奖时间：", wins[:5])
+		}
+		l.logger.Info("展示节点信息：", "节点ID", p.ID()[:10], "前五次获奖时间：", wins)
 
 	}
 }
@@ -557,6 +582,15 @@ func (l *Client) safeAddTx(txHash common.Hash) {
 	l.knownTxsPoolLock.Lock()
 	defer l.knownTxsPoolLock.Unlock()
 	l.knownTxsPool[txHash] = time.Now()
+}
+
+// 将新接手的一批交易加入knownTxsPool
+func (l *Client) safeAddTxs(txHashes []common.Hash) {
+	l.knownTxsPoolLock.Lock()
+	defer l.knownTxsPoolLock.Unlock()
+	for _, txHash := range txHashes {
+		l.knownTxsPool[txHash] = time.Now()
+	}
 }
 
 // 检测当前knownTxsPool内的交易数量

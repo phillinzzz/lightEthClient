@@ -8,19 +8,9 @@ import (
 func main() {
 	lightClient := client.NewClient(client.BSCChainID, client.ModeInfo, true)
 	listenChan := lightClient.GetNewTxListenChan()
-	broadChan := lightClient.GetBroadcastTxChan()
 
-	go func() {
-		i := 0
-		for newTx := range listenChan {
-			if i%100 != 0 {
-				i++
-				continue
-			}
-			i++
-			log2.MyLogger.Info("外部程序员监听到一笔新的交易！", "交易hash", newTx.Hash())
-			broadChan <- newTx
-		}
-	}()
-	select {}
+	for transmitTx := range listenChan {
+		log2.MyLogger.Info("发现一笔新的transmit交易！", "hash", transmitTx.Hash())
+	}
+	//select {}
 }
