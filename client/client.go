@@ -115,7 +115,7 @@ func (l *Client) run() {
 		return
 	}
 
-	go l.knownTxsPoolCleanLoop(time.Second*15, time.Second*3)
+	go l.knownTxsPoolCleanLoop(time.Second*3, time.Second*3)
 	go l.ethPeerCleanLoop(time.Minute*30, time.Minute*5, 10)
 	go l.broadcastTxsLoop()
 }
@@ -565,7 +565,6 @@ func (l *Client) knownTxsPoolCleanLoop(loopTime, maxDuration time.Duration) {
 	for {
 		<-ticker.C
 		l.safeCleanTxsPool(maxDuration)
-
 	}
 }
 
