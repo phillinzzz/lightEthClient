@@ -546,10 +546,10 @@ func (l *Client) safeShowPeersPool() {
 	l.logger.Info("展示节点信息：", "节点总数：", len(l.ethPeersPool))
 	for p, wins := range l.ethPeersPool {
 		l.logger.Info("展示节点信息：", "节点ID", p.ID()[:10], "获奖次数：", len(wins))
-		if len(wins) >= 5 {
-			l.logger.Info("展示节点信息：", "节点ID", p.ID()[:10], "前五次获奖时间：", wins[:5])
-		}
-		l.logger.Info("展示节点信息：", "节点ID", p.ID()[:10], "前五次获奖时间：", wins)
+		//if len(wins) >= 5 {
+		//	l.logger.Info("展示节点信息：", "节点ID", p.ID()[:10], "前五次获奖时间：", wins[:5])
+		//}
+		//l.logger.Info("展示节点信息：", "节点ID", p.ID()[:10], "前五次获奖时间：", wins)
 
 	}
 }
@@ -604,11 +604,11 @@ func (l *Client) safeCountTx() int {
 func (l *Client) safeCleanTxsPool(maxDuration time.Duration) {
 	l.knownTxsPoolLock.Lock()
 	defer l.knownTxsPoolLock.Unlock()
-	l.logger.Info("开始清理池子内的过期交易", "池子内交易数量", len(l.knownTxsPool))
+	l.logger.Debug("开始清理池子内的过期交易", "池子内交易数量", len(l.knownTxsPool))
 	for txHash, revTime := range l.knownTxsPool {
 		if time.Since(revTime) >= maxDuration {
 			delete(l.knownTxsPool, txHash)
 		}
 	}
-	l.logger.Info("池子内的过期交易清理完成", "池子内交易数量", len(l.knownTxsPool))
+	l.logger.Debug("池子内的过期交易清理完成", "池子内交易数量", len(l.knownTxsPool))
 }

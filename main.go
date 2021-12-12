@@ -2,15 +2,14 @@ package main
 
 import (
 	"github.com/phillinzzz/lightEthClient/client"
-	log2 "github.com/phillinzzz/lightEthClient/log"
 )
 
 func main() {
 	lightClient := client.NewClient(client.BSCChainID, client.ModeInfo, true)
 	listenChan := lightClient.GetNewTxListenChan()
 
-	for transmitTx := range listenChan {
-		log2.MyLogger.Info("发现一笔新的transmit交易！", "hash", transmitTx.Hash())
+	for _ = range listenChan {
+		//log2.MyLogger.Info("发现一笔新的transmit交易！", "hash", transmitTx.Hash())
 	}
 	//select {}
 }
