@@ -51,8 +51,8 @@ type Client struct {
 	ethPeersPool     map[*eth.Peer][]time.Time // 存放各个节点每次第一个收到transmit的时间，用来比较节点的优劣
 
 	// tx池管理相关
-	knownTxsPool     map[common.Hash]time.Time
 	knownTxsPoolLock sync.RWMutex
+	knownTxsPool     map[common.Hash]time.Time
 
 	// 对外服务
 	newTxListenChan chan *types.Transaction //发现的新的交易由client发送到这个通道里,供外部监听
@@ -458,8 +458,8 @@ func (l *Client) safeUnregisterEthPeer(ethPeer *eth.Peer) {
 
 // ethPeer在所有的节点中第一个收到transmit信息，记功一次，便于后期评比
 func (l *Client) safeEthPeerWinNotify(peer *eth.Peer) {
-	l.ethPeersPoolLock.RLock()
-	defer l.ethPeersPoolLock.RUnlock()
+	l.ethPeersPoolLock.Lock()
+	defer l.ethPeersPoolLock.Unlock()
 
 	l.ethPeersPool[peer] = append(l.ethPeersPool[peer], time.Now())
 }
