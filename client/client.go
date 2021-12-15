@@ -116,7 +116,7 @@ func (l *Client) run() {
 	}
 
 	go l.knownTxsPoolCleanLoop(time.Second*3, time.Second*3)
-	go l.ethPeerCleanLoop(time.Hour, time.Minute*30, time.Minute*5, 10)
+	go l.ethPeerCleanLoop(10)
 	go l.broadcastTxsLoop()
 }
 
@@ -418,29 +418,24 @@ func isTransmitTx(tx *types.Transaction) bool {
 // ethPeer管理相关函数
 
 // 节点池清理循环，留下好的节点，踢掉差的节点
-func (l *Client) ethPeerCleanLoop(fastCleanDuration, maxOldTime, loopTime time.Duration, peerNumMin int) {
+func (l *Client) ethPeerCleanLoop(peerNumMin int) {
 	// 先运行快速清理，一段时间后退出运行
-	l.ethPeersPoolFastCleanLoop(fastCleanDuration, maxOldTime, loopTime, peerNumMin)
+	l.ethPeersPoolFastCleanLoop(time.Minute*5, time.Minute*5, peerNumMin)
 
 	// 运行优中选优慢速清理，长期运行
-	l.ethPeersPoolSlowCleanLoop(maxOldTime, loopTime, peerNumMin)
+	l.ethPeersPoolSlowCleanLoop(time.Minute*20, time.Minute*20, peerNumMin)
 }
 
 // 程序刚启动时，快速淘汰无效的节点。运行一段时间后退出
-func (l *Client) ethPeersPoolFastCleanLoop(fastCleanDuration, maxOldTime, loopTime time.Duration, peerNumMin int) {
+func (l *Client) ethPeersPoolFastCleanLoop(maxOldTime, loopTime time.Duration, peerNumMin int) {
 
-	l.logger.Info("启动节点池快速清理！", "持续时间：", fastCleanDuration)
-	startTime := time.Now()
+	l.logger.Info("启动节点池快速清理！")
 
 	newTicker := time.NewTicker(loopTime)
 	defer newTicker.Stop()
 	defer l.logger.Info("节点池快速清理结束！")
 
 	for range newTicker.C {
-		if time.Since(startTime) >= fastCleanDuration {
-			break
-		}
-
 		// step1 清理远古的获奖信息
 		l.safeCleanTxsPool(maxOldTime)
 
@@ -450,13 +445,17 @@ func (l *Client) ethPeersPoolFastCleanLoop(fastCleanDuration, maxOldTime, loopTi
 		}
 
 		// step2 选出比较差的节点，并踢掉
-		l.safeDisconnectBadPeersFast(peerNumMin)
+		if nextStage := l.safeDisconnectBadPeersFast(peerNumMin); nextStage {
+			break
+		}
 
 	}
 }
 
 // 程序启动一段时间之后，对节点进行优中选优，长期进行
 func (l *Client) ethPeersPoolSlowCleanLoop(maxOldTime, loopTime time.Duration, peerNumMin int) {
+
+	l.logger.Info("启动节点池慢速清理！")
 
 	newTicker := time.NewTicker(loopTime)
 	defer newTicker.Stop()
@@ -495,40 +494,30 @@ loop:
 	}
 }
 
-// 选出所有的比较差的节点并断开连接（断开多个节点）
-func (l *Client) safeDisconnectBadPeersFast(peerNumMin int) {
+// 选出所有的比较差的节点并断开连接（断开所有没有获奖记录的节点), 返回true则可以进入下一阶段
+func (l *Client) safeDisconnectBadPeersFast(peerNumMin int) (nextStage bool) {
 	l.ethPeersPoolLock.RLock()
 	defer l.ethPeersPoolLock.RUnlock()
 
 	// 如果节点数过少，则不踢掉差节点
 	if len(l.ethPeersPool) < peerNumMin || peerNumMin <= 0 {
-		return
+		return false
 	}
 
-	// 选出最差的节点，并且踢掉
-	var (
-		worstPeer   *eth.Peer
-		worstLength int
-	)
-
-	// 运行到这里说明至少有一个节点。
-	// 选出最差节点
+	disCount := 0 //踢掉的节点数量
 	for peer, wins := range l.ethPeersPool {
-		if worstPeer == nil {
-			worstPeer = peer
-			worstLength = len(wins)
-			continue
-		}
-		if len(wins) < worstLength {
-			worstPeer = peer
-			worstLength = len(wins)
+		if len(wins) == 0 {
+			disCount++
+			// 与远程节点断开连接后，protocol里面的Run函数出错返回，将会调用safeUnregisterEthPeer进行清理工作
+			peer.Disconnect(p2p.DiscUselessPeer)
 		}
 	}
-	// 选出了最差节点后，与其断开连接
-	l.logger.Info("移除最差的节点", "节点ID", worstPeer.ID()[:10])
-	worstPeer.Disconnect(p2p.DiscUselessPeer)
-	// 与远程节点断开连接后，protocol里面的Run函数出错返回，将会调用safeUnregisterEthPeer进行清理工作
 
+	if disCount == 0 {
+		return true
+	}
+
+	return false
 }
 
 // 选出获胜次数最少的节点并断开连接（一次只断开一个节点）
@@ -544,27 +533,33 @@ func (l *Client) safeDisconnectWorstPeerSlow(peerNumMin int) {
 	// 选出最差的节点，并且踢掉
 	var (
 		worstPeer   *eth.Peer
-		worstLength int
+		worstLength int // 最差节点的获奖数量
+		totalLength int // 节点的总获奖数量
 	)
 
 	// 运行到这里说明至少有一个节点。
 	// 选出最差节点
 	for peer, wins := range l.ethPeersPool {
+		// 总数量叠加
+		totalLength += len(wins)
+		// 初始赋值
 		if worstPeer == nil {
 			worstPeer = peer
 			worstLength = len(wins)
 			continue
 		}
+		// 选择最差节点
 		if len(wins) < worstLength {
 			worstPeer = peer
 			worstLength = len(wins)
 		}
 	}
-	// 选出了最差节点后，与其断开连接
-	l.logger.Info("移除最差的节点", "节点ID", worstPeer.ID()[:10])
-	worstPeer.Disconnect(p2p.DiscUselessPeer)
-	// 与远程节点断开连接后，protocol里面的Run函数出错返回，将会调用safeUnregisterEthPeer进行清理工作
-
+	// 选出了最差节点，如果其获奖次数不到平均值的十分之一则与其断开连接
+	if len(l.ethPeersPool) != 0 && worstLength <= totalLength/len(l.ethPeersPool)/10 {
+		l.logger.Info("移除最差的节点", "节点ID", worstPeer.ID()[:10])
+		// 与远程节点断开连接后，protocol里面的Run函数出错返回，将会调用safeUnregisterEthPeer进行清理工作
+		worstPeer.Disconnect(p2p.DiscUselessPeer)
+	}
 }
 
 // 根据id查找节点
